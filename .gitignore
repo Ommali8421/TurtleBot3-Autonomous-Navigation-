@@ -1,0 +1,28 @@
+# Catkin workspace build, devel, and top-level symlink
+catkin_ws/build/
+catkin_ws/devel/
+catkin_ws/install/
+catkin_ws/src/CMakeLists.txt
+build/
+devel/
+install/
+.catkin_workspace
+.catkin_tools/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# ROS logs
+*.log
+.ros/
+
+# OS and Editor files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

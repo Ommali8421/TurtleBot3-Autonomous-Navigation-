@@ -1,0 +1,14 @@
+<launch>
+  <!-- Arguments for target goal coordinates -->
+  <arg name="goal_x" default="2.0" />
+  <arg name="goal_y" default="0.5" />
+  <arg name="goal_w" default="1.0" />
+
+  <!-- Run autonomous goal pose client node -->
+  <node pkg="autonav" type="goal_pose.py" name="goal_pose" output="screen">
+    <param name="goal_x" value="$(arg goal_x)" />
+    <param name="goal_y" value="$(arg goal_y)" />
+    <param name="goal_w" value="$(arg goal_w)" />
+  </node>
+</launch>
+

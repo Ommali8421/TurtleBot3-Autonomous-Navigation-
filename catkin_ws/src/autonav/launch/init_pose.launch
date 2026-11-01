@@ -1,0 +1,5 @@
+<launch>
+  <!-- Initialize robot localization in AMCL from Gazebo odometry -->
+  <node pkg="autonav" type="init_pose.py" name="init_pose" output="screen" />
+</launch>
+
