@@ -2,8 +2,9 @@
 """
 Node: init_pose
 Description: Programmatically synchronizes AMCL localization with Gazebo reality
-             by reading the robot's actual initial pose from '/odom' (or Gazebo ground truth)
-             and publishing it to the '/initialpose' topic.
+             by reading the robot's ground truth pose from Gazebo (/gazebo/model_states)
+             or offsetting /odom by the Gazebo spawn position (-2.0, -0.5),
+             then publishing to '/initialpose' (geometry_msgs/PoseWithCovarianceStamped).
 Package: autonav
 Target: ROS 1 Melodic / Noetic (TurtleBot3 Burger)
 """
@@ -13,105 +14,139 @@ import rospy
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 
+try:
+    from gazebo_msgs.msg import ModelStates
+    HAS_GAZEBO_MSGS = True
+except ImportError:
+    HAS_GAZEBO_MSGS = False
+
 
 def publish_initial_pose():
     # 1. Initialize ROS Node
     rospy.init_node('init_pose', anonymous=False)
-    rospy.loginfo("[init_pose] Node initialized. Waiting for /odom to retrieve robot pose...")
+    rospy.loginfo("[init_pose] Node initialized. Synchronizing AMCL localization with Gazebo...")
 
-    # 2. Setup Publisher to /initialpose
-    # AMCL subscribes to /initialpose (geometry_msgs/PoseWithCovarianceStamped)
+    # Check CLI arguments for custom override: rosrun autonav init_pose.py <X> <Y> <W>
+    custom_x = None
+    custom_y = None
+    custom_w = 1.0
+
+    if len(sys.argv) >= 3:
+        try:
+            custom_x = float(sys.argv[1])
+            custom_y = float(sys.argv[2])
+            if len(sys.argv) >= 4:
+                custom_w = float(sys.argv[3])
+            rospy.loginfo("[init_pose] Custom initial pose provided via CLI: (x=%.2f, y=%.2f, w=%.2f)",
+                          custom_x, custom_y, custom_w)
+        except ValueError:
+            custom_x = None
+
+    # Setup Publisher to /initialpose
     init_pose_pub = rospy.Publisher('/initialpose', PoseWithCovarianceStamped, queue_size=10, latch=True)
 
-    # 3. Robustly listen to /odom topic until received or shutdown
-    odom_msg = None
-    rate = rospy.Rate(2)  # Check every 0.5s
-    while not rospy.is_shutdown() and odom_msg is None:
-        try:
-            odom_msg = rospy.wait_for_message('/odom', Odometry, timeout=3.0)
-            rospy.loginfo("[init_pose] Successfully received initial odometry from /odom.")
-        except rospy.ROSException:
-            rospy.loginfo("[init_pose] Still waiting for /odom topic from Gazebo...")
+    posX = -2.0
+    posY = -0.5
+    posZ = 0.0
+    orientX = 0.0
+    orientY = 0.0
+    orientZ = 0.0
+    orientW = 1.0
 
-    if rospy.is_shutdown() or odom_msg is None:
-        rospy.logwarn("[init_pose] Shutdown requested before receiving /odom message. Exiting.")
-        return
+    if custom_x is not None:
+        posX = custom_x
+        posY = custom_y
+        orientW = custom_w
+    else:
+        # Try retrieving ground truth directly from Gazebo
+        found_gazebo = False
+        if HAS_GAZEBO_MSGS:
+            try:
+                rospy.loginfo("[init_pose] Querying /gazebo/model_states for ground-truth pose...")
+                model_states = rospy.wait_for_message('/gazebo/model_states', ModelStates, timeout=2.0)
+                if 'turtlebot3_burger' in model_states.name:
+                    idx = model_states.name.index('turtlebot3_burger')
+                    p = model_states.pose[idx]
+                    posX = p.position.x
+                    posY = p.position.y
+                    posZ = p.position.z
+                    orientX = p.orientation.x
+                    orientY = p.orientation.y
+                    orientZ = p.orientation.z
+                    orientW = p.orientation.w
+                    found_gazebo = True
+                    rospy.loginfo("[init_pose] Successfully retrieved ground truth from Gazebo: (x=%.3f, y=%.3f)", posX, posY)
+            except rospy.ROSException:
+                rospy.loginfo("[init_pose] /gazebo/model_states not immediately available. Falling back...")
+
+        # If Gazebo topic not available, retrieve /odom and apply spawn offset (-2.0, -0.5)
+        if not found_gazebo:
+            try:
+                rospy.loginfo("[init_pose] Listening to /odom...")
+                odom_msg = rospy.wait_for_message('/odom', Odometry, timeout=3.0)
+                # In Gazebo, /odom starts at (0, 0) relative to spawn point (-2.0, -0.5)
+                # Therefore map_x = spawn_x + odom_x
+                posX = -2.0 + odom_msg.pose.pose.position.x
+                posY = -0.5 + odom_msg.pose.pose.position.y
+                orientX = odom_msg.pose.pose.orientation.x
+                orientY = odom_msg.pose.pose.orientation.y
+                orientZ = odom_msg.pose.pose.orientation.z
+                orientW = odom_msg.pose.pose.orientation.w
+                rospy.loginfo("[init_pose] Synchronized using /odom + spawn offset (-2.0, -0.5): (x=%.3f, y=%.3f)", posX, posY)
+            except rospy.ROSException:
+                rospy.loginfo("[init_pose] Using default Gazebo spawn position: (x=-2.0, y=-0.5, w=1.0)")
+                posX = -2.0
+                posY = -0.5
 
     # 4. Construct PoseWithCovarianceStamped message
     init_pose = PoseWithCovarianceStamped()
-
-    # Header configuration
     init_pose.header.stamp = rospy.Time.now()
-    init_pose.header.frame_id = "map"  # AMCL expects coordinates in the 'map' frame
+    init_pose.header.frame_id = "map"  # AMCL requires coordinates in the 'map' frame
 
-    # Extract Position from Odometry
-    init_pose.pose.pose.position.x = odom_msg.pose.pose.position.x
-    init_pose.pose.pose.position.y = odom_msg.pose.pose.position.y
-    init_pose.pose.pose.position.z = odom_msg.pose.pose.position.z
+    init_pose.pose.pose.position.x = posX
+    init_pose.pose.pose.position.y = posY
+    init_pose.pose.pose.position.z = posZ
 
-    # Extract Orientation from Odometry
-    init_pose.pose.pose.orientation.x = odom_msg.pose.pose.orientation.x
-    init_pose.pose.pose.orientation.y = odom_msg.pose.pose.orientation.y
-    init_pose.pose.pose.orientation.z = odom_msg.pose.pose.orientation.z
-    init_pose.pose.pose.orientation.w = odom_msg.pose.pose.orientation.w
+    init_pose.pose.pose.orientation.x = orientX
+    init_pose.pose.pose.orientation.y = orientY
+    init_pose.pose.pose.orientation.z = orientZ
+    init_pose.pose.pose.orientation.w = orientW if orientW != 0.0 else 1.0
 
-    # Ensure quaternion is non-zero / valid
-    if (init_pose.pose.pose.orientation.x == 0.0 and
-        init_pose.pose.pose.orientation.y == 0.0 and
-        init_pose.pose.pose.orientation.z == 0.0 and
-        init_pose.pose.pose.orientation.w == 0.0):
-        init_pose.pose.pose.orientation.w = 1.0
-
-    # Populate Covariance matrix (6x6 covariance represented as a 36-element list)
-    # Small non-zero variances indicate high initial confidence to AMCL particle filter
+    # Covariance matrix (high confidence for initial convergence)
     covariance = [0.0] * 36
-    covariance[0] = 0.25   # Covariance x
-    covariance[7] = 0.25   # Covariance y
-    covariance[35] = 0.068 # Covariance yaw (approx (pi/12)^2)
+    covariance[0] = 0.05   # x variance (small for sharp particle convergence)
+    covariance[7] = 0.05   # y variance
+    covariance[35] = 0.05  # yaw variance
     init_pose.pose.covariance = covariance
 
-    # Log the captured pose
-    rospy.loginfo("[init_pose] Synchronizing AMCL initial pose:")
-    rospy.loginfo("             Position:    (x=%.3f, y=%.3f, z=%.3f)",
-                  init_pose.pose.pose.position.x,
-                  init_pose.pose.pose.position.y,
-                  init_pose.pose.pose.position.z)
+    # 5. Wait for AMCL subscriber to connect before publishing
+    rospy.loginfo("[init_pose] Publishing initial pose to AMCL (/initialpose):")
+    rospy.loginfo("             Position:    (x=%.3f, y=%.3f, z=%.3f)", posX, posY, posZ)
     rospy.loginfo("             Orientation: (x=%.3f, y=%.3f, z=%.3f, w=%.3f)",
                   init_pose.pose.pose.orientation.x,
                   init_pose.pose.pose.orientation.y,
                   init_pose.pose.pose.orientation.z,
                   init_pose.pose.pose.orientation.w)
 
-    # 5. Wait for AMCL subscriber to connect before publishing
-    rospy.loginfo("[init_pose] Waiting for subscribers on /initialpose...")
-    wait_rate = rospy.Rate(5)  # 5 Hz
+    wait_rate = rospy.Rate(5)
     attempts = 0
-    max_attempts = 30  # 6 seconds wait
-
-    while not rospy.is_shutdown() and init_pose_pub.get_num_connections() == 0 and attempts < max_attempts:
+    while not rospy.is_shutdown() and init_pose_pub.get_num_connections() == 0 and attempts < 25:
         attempts += 1
         wait_rate.sleep()
 
-    if init_pose_pub.get_num_connections() == 0:
-        rospy.logwarn("[init_pose] No active subscribers detected on /initialpose. Publishing anyway (latched)...")
-
-    # Publish several times with updated timestamp to ensure AMCL particle cloud is initialized
-    for _ in range(3):
+    # Publish multiple times to ensure AMCL particle filter collapses around the true pose
+    for _ in range(5):
         if rospy.is_shutdown():
             break
         init_pose.header.stamp = rospy.Time.now()
         init_pose_pub.publish(init_pose)
-        rospy.sleep(0.2)
+        rospy.sleep(0.15)
 
-    rospy.loginfo("[init_pose] Initial pose successfully published to /initialpose!")
-
-    # Allow network buffer flush before node termination
-    rospy.sleep(1.0)
-    rospy.loginfo("[init_pose] AMCL localization synchronization complete.")
+    rospy.loginfo("[init_pose] AMCL localization successfully synchronized at (x=%.2f, y=%.2f)!", posX, posY)
 
 
 if __name__ == '__main__':
     try:
         publish_initial_pose()
     except rospy.ROSInterruptException:
-        rospy.loginfo("[init_pose] Node interrupted before completion.")
+        pass

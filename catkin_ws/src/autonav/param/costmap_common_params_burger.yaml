@@ -1,20 +1,19 @@
 # ═══════════════════════════════════════════════════════════════
 # Tuned Costmap Parameters for TurtleBot 3 Burger
-# Solves obstacle collision between pillars by setting
-# appropriate circular footprint padding and inflation radius
+# Appropriate inflation radius (0.40m) leaves 80cm clear corridors
+# between the 1.1m-spaced pillars in turtlebot3_world
 # ═══════════════════════════════════════════════════════════════
 
 obstacle_range: 3.0
 raytrace_range: 3.5
 
-# Full circular collision footprint with safety margin (radius 12 cm + 3 cm padding)
-robot_radius: 0.12
-footprint_padding: 0.03
+# Circular footprint for TurtleBot 3 Burger (10.5 cm radius + 2 cm padding)
+robot_radius: 0.105
+footprint_padding: 0.02
 
-# Tuned inflation clearance: allows clean corridor passage between pillars (1.25m apart)
-# while guaranteeing robot never grazes obstacle edges
-inflation_radius: 0.42
-cost_scaling_factor: 4.0
+# Tuned inflation clearance: keeps 80cm open corridors between the 9 pillars
+inflation_radius: 0.40
+cost_scaling_factor: 3.5
 
 map_type: costmap
 observation_sources: scan
