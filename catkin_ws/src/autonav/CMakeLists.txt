@@ -41,7 +41,10 @@ catkin_install_python(PROGRAMS
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-# Install launch files
+# Install launch files and parameter files
 install(DIRECTORY launch/
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
+)
+install(DIRECTORY param/
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/param
 )

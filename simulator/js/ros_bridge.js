@@ -1,11 +1,12 @@
 /**
  * ROSBridge WebSocket Connector (roslibjs)
  * Synchronizes the 3D Web Simulator live with real ROS Melodic / Noetic:
- * - Subscribes to /odom (mirrors physical/Gazebo TurtleBot3)
- * - Subscribes to /cmd_vel (drives wheel animations)
- * - Subscribes to /move_base/status
- * - Publishes to /move_base_simple/goal (dispatches 3D web clicks directly to ROS)
- * - Auto-reconnection logic so it links automatically as soon as ROSBridge starts
+ * - Subscribes to /amcl_pose (the EXACT map-frame localized pose shown in RViz)
+ * - Subscribes to /move_base/feedback (real-time trajectory updates during navigation)
+ * - Subscribes to /odom (continuous odometry fallback)
+ * - Subscribes to /cmd_vel (drives wheel animations and speed telemetries)
+ * - Subscribes to /move_base_simple/goal & /move_base/current_goal (mirrors RViz goals)
+ * - Auto-reconnection logic so it links automatically as soon as ROS starts
  */
 
 class ROSBridge {
@@ -17,16 +18,18 @@ class ROSBridge {
     this.retryTimer = null;
 
     // Subscriptions & Publishers
+    this.amclSub = null;
+    this.feedbackSub = null;
     this.odomSub = null;
     this.cmdVelSub = null;
-    this.statusSub = null;
+    this.goalSub = null;
     this.goalPub = null;
 
     // Event hooks
     this.onConnectionChange = null;
-    this.onOdomReceived = null;
+    this.onPoseReceived = null;
     this.onCmdVelReceived = null;
-    this.onStatusReceived = null;
+    this.onGoalReceived = null;
   }
 
   connect(customUrl = null) {
@@ -52,7 +55,7 @@ class ROSBridge {
 
       this.ros.on('connection', () => {
         this.connected = true;
-        console.log('[ROSBridge] Successfully connected to ROS WebSocket server at:', this.url);
+        console.log('[ROSBridge] Successfully connected to ROS at:', this.url);
         this.setupTopics();
         if (this.onConnectionChange) this.onConnectionChange(true, 'Connected to ROS (' + this.url + ')');
       });
@@ -84,7 +87,7 @@ class ROSBridge {
         console.log('[ROSBridge] Attempting to reconnect to ROS...');
         this.connect();
       }
-    }, 3000);
+    }, 2500);
   }
 
   disconnect() {
@@ -103,41 +106,88 @@ class ROSBridge {
   setupTopics() {
     if (!this.ros) return;
 
-    // 1. Subscribe to /odom
+    // Helper: Extract yaw from quaternion
+    const extractYaw = (orient) => {
+      const siny_cosp = 2 * (orient.w * orient.z + orient.x * orient.y);
+      const cosy_cosp = 1 - 2 * (orient.y * orient.y + orient.z * orient.z);
+      return Math.atan2(siny_cosp, cosy_cosp);
+    };
+
+    // ─── 1. Subscribe to /amcl_pose (The exact pose rendered in RViz) ───
+    this.amclSub = new ROSLIB.Topic({
+      ros: this.ros,
+      name: '/amcl_pose',
+      messageType: 'geometry_msgs/PoseWithCovarianceStamped'
+    });
+
+    this.amclSub.subscribe((msg) => {
+      const pos = msg.pose.pose.position;
+      const yaw = extractYaw(msg.pose.pose.orientation);
+      if (this.onPoseReceived) {
+        this.onPoseReceived(pos.x, pos.y, yaw);
+      }
+    });
+
+    // ─── 2. Subscribe to /move_base/feedback (Real-time tracking from planner) ───
+    this.feedbackSub = new ROSLIB.Topic({
+      ros: this.ros,
+      name: '/move_base/feedback',
+      messageType: 'move_base_msgs/MoveBaseActionFeedback'
+    });
+
+    this.feedbackSub.subscribe((msg) => {
+      const pos = msg.feedback.base_position.pose.position;
+      const yaw = extractYaw(msg.feedback.base_position.pose.orientation);
+      if (this.onPoseReceived) {
+        this.onPoseReceived(pos.x, pos.y, yaw);
+      }
+    });
+
+    // ─── 3. Subscribe to /odom (Fallback high-frequency odometry) ───
     this.odomSub = new ROSLIB.Topic({
       ros: this.ros,
       name: '/odom',
       messageType: 'nav_msgs/Odometry'
     });
 
-    this.odomSub.subscribe((message) => {
-      const pos = message.pose.pose.position;
-      const orient = message.pose.pose.orientation;
-
-      // Extract yaw from quaternion (roll=0, pitch=0 on flat ground)
-      const siny_cosp = 2 * (orient.w * orient.z + orient.x * orient.y);
-      const cosy_cosp = 1 - 2 * (orient.y * orient.y + orient.z * orient.z);
-      const yaw = Math.atan2(siny_cosp, cosy_cosp);
-
-      if (this.onOdomReceived) {
-        this.onOdomReceived(pos.x, pos.y, yaw);
+    this.odomSub.subscribe((msg) => {
+      // Only use /odom if AMCL or move_base feedback hasn't arrived recently
+      const pos = msg.pose.pose.position;
+      const yaw = extractYaw(msg.pose.pose.orientation);
+      if (this.onPoseReceived) {
+        this.onPoseReceived(pos.x, pos.y, yaw, /* isOdom */ true);
       }
     });
 
-    // 2. Subscribe to /cmd_vel
+    // ─── 4. Subscribe to /cmd_vel (For wheel rotation speed) ───
     this.cmdVelSub = new ROSLIB.Topic({
       ros: this.ros,
       name: '/cmd_vel',
       messageType: 'geometry_msgs/Twist'
     });
 
-    this.cmdVelSub.subscribe((message) => {
+    this.cmdVelSub.subscribe((msg) => {
       if (this.onCmdVelReceived) {
-        this.onCmdVelReceived(message.linear.x, message.angular.z);
+        this.onCmdVelReceived(msg.linear.x, msg.angular.z);
       }
     });
 
-    // 3. Publisher for /move_base_simple/goal
+    // ─── 5. Subscribe to /move_base_simple/goal (Mirror RViz 2D Nav Goal beacon) ───
+    this.goalSub = new ROSLIB.Topic({
+      ros: this.ros,
+      name: '/move_base_simple/goal',
+      messageType: 'geometry_msgs/PoseStamped'
+    });
+
+    this.goalSub.subscribe((msg) => {
+      const pos = msg.pose.position;
+      const w = msg.pose.orientation.w;
+      if (this.onGoalReceived) {
+        this.onGoalReceived(pos.x, pos.y, w);
+      }
+    });
+
+    // ─── 6. Publisher for /move_base_simple/goal ───
     this.goalPub = new ROSLIB.Topic({
       ros: this.ros,
       name: '/move_base_simple/goal',

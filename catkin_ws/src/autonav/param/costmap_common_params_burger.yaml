@@ -1,0 +1,19 @@
+# ═══════════════════════════════════════════════════════════════
+# Tuned Costmap Parameters for TurtleBot 3 Burger
+# Solves obstacle struggling between pillars by setting
+# appropriate inflation radius (0.45m) and cost scaling
+# ═══════════════════════════════════════════════════════════════
+
+obstacle_range: 3.0
+raytrace_range: 3.5
+
+footprint: [[-0.105, -0.105], [-0.105, 0.105], [0.041, 0.105], [0.041, -0.105]]
+# robot_radius: 0.105
+
+# Tuned inflation clearance: allows clean corridor passage between pillars (1.25m apart)
+inflation_radius: 0.45
+cost_scaling_factor: 3.0
+
+map_type: costmap
+observation_sources: scan
+scan: {sensor_frame: base_scan, data_type: LaserScan, topic: scan, marking: true, clearing: true}

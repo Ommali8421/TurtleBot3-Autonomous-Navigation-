@@ -14,7 +14,12 @@
     <arg name="move_forward_only" value="$(arg move_forward_only)" />
   </include>
 
-  <!-- 2. ROSBridge WebSocket Server for the 3D Web Simulator & FPV -->
+  <!-- 2. Optimized Local Planner & Costmap Overrides (eliminates obstacle struggling) -->
+  <rosparam file="$(find autonav)/param/costmap_common_params_burger.yaml" command="load" ns="move_base/global_costmap" />
+  <rosparam file="$(find autonav)/param/costmap_common_params_burger.yaml" command="load" ns="move_base/local_costmap" />
+  <rosparam file="$(find autonav)/param/dwa_local_planner_params_burger.yaml" command="load" ns="move_base/DWAPlannerROS" />
+
+  <!-- 3. ROSBridge WebSocket Server for the 3D Web Simulator (port 9090) -->
   <include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch">
     <arg name="port" value="$(arg port)" />
   </include>

@@ -312,18 +312,42 @@ class App {
       }
     }
 
-    // ROS Bridge callbacks
+    // ROS Bridge callbacks - synchronized with RViz
+    this.lastMapPoseTime = 0;
+
     this.rosBridge.onConnectionChange = (connected, msg) => {
       const badge = document.getElementById('ros-status-badge');
       if (badge) {
-        badge.textContent = connected ? 'ROS CONNECTED' : 'STANDALONE';
+        badge.textContent = connected ? 'ROS CONNECTED (RVIZ SYNC)' : 'STANDALONE';
         badge.className = connected ? 'status-pill green' : 'status-pill';
+      }
+      if (connected) {
+        // Cancel any standalone autonomous navigation
+        this.navigator.cancelGoal();
       }
     };
 
-    this.rosBridge.onOdomReceived = (x, y, yaw) => {
-      // Mirror physical Gazebo position
-      this.kinematics.setPose(x, y, yaw);
+    this.rosBridge.onPoseReceived = (x, y, yaw, isOdom = false) => {
+      const now = Date.now();
+      if (!isOdom) {
+        // High priority: exact map-frame localized pose from AMCL / move_base (matching RViz)
+        this.lastMapPoseTime = now;
+        this.kinematics.setPose(x, y, yaw);
+      } else if (now - this.lastMapPoseTime > 2000) {
+        // Fallback: raw odometry only if no AMCL pose received yet
+        this.kinematics.setPose(x, y, yaw);
+      }
+    };
+
+    this.rosBridge.onCmdVelReceived = (linear, angular) => {
+      this.kinematics.linearVel = linear;
+      this.kinematics.angularVel = angular;
+    };
+
+    this.rosBridge.onGoalReceived = (x, y, w) => {
+      // Mirror RViz 2D Nav Goal in the 3D Web View
+      this.navigator.goalBeacon.position.set(x, 0.01, -y);
+      this.navigator.goalBeacon.visible = true;
     };
 
     // Navigator status callbacks
@@ -385,16 +409,29 @@ class App {
 
     const dt = Math.min(this.clock.getDelta(), 0.1);
 
-    // 1. Update Autonomous Navigator (controls cmdLinear & cmdAngular if ACTIVE)
-    this.navigator.update(dt);
+    if (this.rosBridge.connected) {
+      // ─── ROS MASTER MODE (Perfect 1:1 Sync with RViz & Gazebo) ───
+      // When connected to ROS, the robot pose is driven directly by AMCL/move_base.
+      this.turtlebot.setPose(this.kinematics.x, this.kinematics.y, this.kinematics.yaw);
+      this.turtlebot.update(this.kinematics.linearVel, this.kinematics.angularVel, dt);
 
-    // 2. Step Physics & Kinematics
-    const isAutonomous = (this.navigator.state === 'ACTIVE');
-    this.kinematics.update(dt, isAutonomous);
+      // Keep LiDAR scan rays synced around current ROS position
+      if (this.kinematics.lidarEnabled) {
+        this.kinematics.computeLidarScan();
+      }
+    } else {
+      // ─── STANDALONE SIMULATOR MODE ───
+      // 1. Update Autonomous Multi-Obstacle A* Navigator
+      this.navigator.update(dt);
 
-    // 3. Update 3D Model position & animation (wheels, LiDAR, heartbeat)
-    this.turtlebot.setPose(this.kinematics.x, this.kinematics.y, this.kinematics.yaw);
-    this.turtlebot.update(this.kinematics.linearVel, this.kinematics.angularVel, dt);
+      // 2. Step Physics & Kinematics
+      const isAutonomous = (this.navigator.state === 'ACTIVE');
+      this.kinematics.update(dt, isAutonomous);
+
+      // 3. Update 3D Model position & animation
+      this.turtlebot.setPose(this.kinematics.x, this.kinematics.y, this.kinematics.yaw);
+      this.turtlebot.update(this.kinematics.linearVel, this.kinematics.angularVel, dt);
+    }
 
     // 4. Update Cameras (FPV eye position, chase cam lerp, etc.)
     this.updateCameras(dt);
