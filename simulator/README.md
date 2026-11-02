@@ -76,3 +76,4 @@ If you are running Gazebo or the ROS navigation stack in Docker/WSL:
    *(Or run `roslaunch autonav web_telemetry.launch`)*
 2. In the 3D simulator web interface, enable the toggle: **Connect Live to ROS (WebSocket)**.
 3. The 3D robot in your browser will now mirror the real Gazebo robot in real-time!
+

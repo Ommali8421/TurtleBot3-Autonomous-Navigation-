@@ -283,3 +283,4 @@ class Navigator {
 if (typeof window !== 'undefined') {
   window.Navigator = Navigator;
 }
+

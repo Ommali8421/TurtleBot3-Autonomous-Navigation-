@@ -5,6 +5,7 @@
  * - Subscribes to /cmd_vel (drives wheel animations)
  * - Subscribes to /move_base/status
  * - Publishes to /move_base_simple/goal (dispatches 3D web clicks directly to ROS)
+ * - Auto-reconnection logic so it links automatically as soon as ROSBridge starts
  */
 
 class ROSBridge {
@@ -12,6 +13,8 @@ class ROSBridge {
     this.url = options.url || 'ws://localhost:9090';
     this.ros = null;
     this.connected = false;
+    this.autoReconnect = true;
+    this.retryTimer = null;
 
     // Subscriptions & Publishers
     this.odomSub = null;
@@ -28,44 +31,73 @@ class ROSBridge {
 
   connect(customUrl = null) {
     if (customUrl) this.url = customUrl;
+    this.autoReconnect = true;
 
     if (typeof ROSLIB === 'undefined') {
       console.warn('[ROSBridge] ROSLIB not found. Live ROS sync disabled.');
       return;
     }
 
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+
     try {
+      if (this.ros) {
+        this.ros.close();
+      }
+
       this.ros = new ROSLIB.Ros({ url: this.url });
 
       this.ros.on('connection', () => {
         this.connected = true;
-        console.log('[ROSBridge] Connected to ROS WebSocket server at:', this.url);
+        console.log('[ROSBridge] Successfully connected to ROS WebSocket server at:', this.url);
         this.setupTopics();
         if (this.onConnectionChange) this.onConnectionChange(true, 'Connected to ROS (' + this.url + ')');
       });
 
       this.ros.on('error', (err) => {
         this.connected = false;
-        console.warn('[ROSBridge] Error connecting to ROS:', err);
-        if (this.onConnectionChange) this.onConnectionChange(false, 'ROS Connection Error');
+        if (this.onConnectionChange) this.onConnectionChange(false, 'Connecting to ROS...');
+        this.scheduleReconnect();
       });
 
       this.ros.on('close', () => {
         this.connected = false;
-        console.log('[ROSBridge] Connection to ROS closed.');
-        if (this.onConnectionChange) this.onConnectionChange(false, 'Disconnected (Standalone Mode)');
+        if (this.onConnectionChange) this.onConnectionChange(false, 'Waiting for ROS...');
+        this.scheduleReconnect();
       });
     } catch (e) {
       console.warn('[ROSBridge] Exception starting WebSocket:', e);
       if (this.onConnectionChange) this.onConnectionChange(false, 'Standalone Mode');
+      this.scheduleReconnect();
     }
   }
 
+  scheduleReconnect() {
+    if (!this.autoReconnect || this.connected) return;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+
+    this.retryTimer = setTimeout(() => {
+      if (this.autoReconnect && !this.connected) {
+        console.log('[ROSBridge] Attempting to reconnect to ROS...');
+        this.connect();
+      }
+    }, 3000);
+  }
+
   disconnect() {
+    this.autoReconnect = false;
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
     if (this.ros) {
       this.ros.close();
       this.connected = false;
     }
+    if (this.onConnectionChange) this.onConnectionChange(false, 'Standalone Mode');
   }
 
   setupTopics() {

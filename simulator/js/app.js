@@ -304,6 +304,12 @@ class App {
           this.rosBridge.disconnect();
         }
       });
+
+      // Auto-connect on page load
+      if (rosSwitch.checked) {
+        const url = document.getElementById('input-ros-url').value;
+        this.rosBridge.connect(url);
+      }
     }
 
     // ROS Bridge callbacks
@@ -415,3 +421,4 @@ class App {
 window.addEventListener('DOMContentLoaded', () => {
   window.simulatorApp = new App();
 });
+

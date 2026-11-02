@@ -204,3 +204,4 @@ class World {
 if (typeof window !== 'undefined') {
   window.World = World;
 }
+

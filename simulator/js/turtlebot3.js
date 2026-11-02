@@ -272,3 +272,4 @@ class TurtleBot3 {
 if (typeof window !== 'undefined') {
   window.TurtleBot3 = TurtleBot3;
 }
+

@@ -595,3 +595,4 @@ input:checked + .slider:before {
   color: var(--accent-cyan);
   font-weight: 700;
 }
+

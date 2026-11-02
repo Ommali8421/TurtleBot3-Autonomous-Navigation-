@@ -299,3 +299,4 @@ class Kinematics {
 if (typeof window !== 'undefined') {
   window.Kinematics = Kinematics;
 }
+
