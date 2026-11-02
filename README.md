@@ -1,39 +1,91 @@
-# Autonomous Navigation for TurtleBot 3 (Burger) in ROS 1 (Melodic / Noetic)
+# Autonomous Navigation & 3D Simulator for TurtleBot 3 (Burger) in ROS 1 (Melodic / Noetic)
 
 [![ROS 1](https://img.shields.io/badge/ROS-Melodic%20%7C%20Noetic-brightgreen.svg)](http://wiki.ros.org/)
 [![Robot](https://img.shields.io/badge/Robot-TurtleBot3%20Burger-blue.svg)](https://emanual.robotis.com/docs/en/platform/turtlebot3/overview/)
-[![Simulation](https://img.shields.io/badge/Simulation-Gazebo-orange.svg)](http://gazebosim.org/)
+[![Simulation](https://img.shields.io/badge/Simulation-Gazebo%20%7C%20Three.js-orange.svg)](http://gazebosim.org/)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
 
-An end-to-end autonomous navigation package (`autonav`) designed for ROS 1 (compatible with both Ubuntu 18.04 Melodic and Ubuntu 20.04 Noetic). This project demonstrates how to programmatically control and navigate a **TurtleBot 3 Burger** mobile robot inside a simulated Gazebo environment using AMCL localization and the ROS `move_base` action server pipeline.
+An end-to-end autonomous navigation package (`autonav`) and **interactive 3D WebGL simulator** designed for ROS 1 (compatible with both Ubuntu 18.04 Melodic and Ubuntu 20.04 Noetic). This project demonstrates how to programmatically control and navigate a **TurtleBot 3 Burger** mobile robot inside a simulated Gazebo environment using AMCL localization and the ROS `move_base` action server pipeline, as well as view and interact with the robot in **3D first-person perspective (FPV)** directly inside your web browser.
 
 ---
 
 ## Table of Contents
 1. [What is This Project?](#what-is-this-project)
-2. [Why Do We Need It?](#why-do-we-need-it)
+2. [3D Web Simulator & Robot Perspectives (FPV)](#3d-web-simulator--robot-perspectives-fpv)
+   - [Camera Perspectives](#camera-perspectives)
+   - [How to Run the 3D Simulator](#how-to-run-the-3d-simulator)
+   - [Live Synchronization with ROS](#live-synchronization-with-ros)
+3. [Why Do We Need It?](#why-do-we-need-it)
    - [The Problem with Manual Navigation (RViz)](#the-problem-with-manual-navigation-rviz)
    - [Why Synchronize Odometry and AMCL (`init_pose.py`)?](#why-synchronize-odometry-and-amcl-init_posepy)
    - [Why Use an Action Client (`goal_pose.py`)?](#why-use-an-action-client-goal_posepy)
-3. [System Architecture & Data Flow](#system-architecture--data-flow)
-4. [Package Structure](#package-structure)
-5. [Script Deep-Dive](#script-deep-dive)
+4. [System Architecture & Data Flow](#system-architecture--data-flow)
+5. [Package Structure](#package-structure)
+6. [Script Deep-Dive](#script-deep-dive)
    - [`init_pose.py`](#init_posepy-overview)
    - [`goal_pose.py`](#goal_posepy-overview)
-6. [Prerequisites & System Requirements](#prerequisites--system-requirements)
-7. [Installation & Build Guide](#installation--build-guide)
-8. [Step-by-Step Execution Walkthrough](#step-by-step-execution-walkthrough)
-9. [Action Server Status Codes Reference](#action-server-status-codes-reference)
-10. [Troubleshooting & Common Pitfalls](#troubleshooting--common-pitfalls)
+7. [Prerequisites & System Requirements](#prerequisites--system-requirements)
+8. [Installation & Build Guide](#installation--build-guide)
+9. [Step-by-Step Execution Walkthrough](#step-by-step-execution-walkthrough)
+10. [Action Server Status Codes Reference](#action-server-status-codes-reference)
+11. [Troubleshooting & Common Pitfalls](#troubleshooting--common-pitfalls)
 
 ---
 
 ## What is This Project?
 
-This repository contains the `autonav` ROS package. It provides autonomous programmatic scripts written in Python (`rospy`) to:
-1. **Initialize and synchronize robot localization** in AMCL (Adaptive Monte Carlo Localization) using simulated ground-truth odometry from Gazebo (`init_pose.py`).
-2. **Command the robot to navigate to target coordinates** (`x=2.0`, `y=0.5`, `w=1.0`) by interfacing with the `move_base` action server (`goal_pose.py`).
-3. **Monitor navigation lifecycle in real time** through active notifications, throttled feedback coordinates, and terminal status verification (specifically checking for status code `3` for success).
+This repository contains two interconnected components:
+1. **The `autonav` ROS Package:** Programmatic scripts written in Python (`rospy`) to:
+   - Synchronize robot localization in AMCL using simulated ground-truth odometry from Gazebo (`init_pose.py`).
+   - Command the robot to navigate to target coordinates (`x=2.0`, `y=0.5`, `w=1.0`) by interfacing with the `move_base` action server (`goal_pose.py`).
+   - Monitor navigation lifecycle in real time through active notifications, throttled feedback coordinates, and status code verification (`status == 3` for SUCCEEDED).
+2. **The 3D Web Simulator (`simulator/`):** A zero-install WebGL simulator running directly in any modern browser (Chrome, Edge, Firefox) on Windows or Linux, rendering the TurtleBot3 Burger in 3D with a **first-person perspective (FPV)**, differential-drive physics, 360° LiDAR, and click-on-floor autonomous path planning.
+
+---
+
+## 3D Web Simulator & Robot Perspectives (FPV)
+
+While RViz provides a 2D top-down occupancy grid, the included **3D Web Simulator** allows you to visualize and drive the TurtleBot 3 in full 3D with authentic physics, dynamic lighting, and multiple camera angles.
+
+### Camera Perspectives
+
+| Mode | Shortcut | Description |
+|:---|:---:|:---|
+| **👁️ Robot First-Person View (FPV)** | `1` | Camera is mounted at the front eye of TurtleBot 3, looking forward into the world with a reticle crosshair. Experience exactly what the robot "sees" as it drives. |
+| **🎥 Follow / Chase Cam** | `2` | Smooth cinematic over-the-shoulder third-person camera trailing behind the robot. |
+| **🌐 Free Orbit View** | `3` | 360° free rotation, panning, and zooming around the arena using the mouse. |
+| **🗺️ Top-Down Map View** | `4` | High-altitude aerial orthographic-style projection showing the full coordinate grid. |
+| **🖼️ Picture-in-Picture (PiP)** | Click PiP | A live video-style feed in the bottom-right corner showing the alternate perspective (FPV). **Click the PiP window to instantly promote FPV to full screen!** |
+
+### How to Run the 3D Simulator
+
+#### Option A: One-Click Windows Launcher (Easiest)
+Double-click **`run_simulator.bat`** in the repository root. This automatically spins up a local web server and opens the 3D simulator in your default browser.
+
+#### Option B: Python Command Line
+```bash
+python -m http.server 8000 --directory simulator
+```
+Then visit **[http://localhost:8000](http://localhost:8000)** in your browser.
+
+#### Option C: Direct File Opening
+Double-click `simulator/index.html` to open directly in Chrome, Edge, or Firefox.
+
+### Simulator Features:
+* **Interactive Floor Click Goal:** Click anywhere on the 3D arena floor to dispatch a target waypoint; the simulated robot plans an obstacle-clearing path and navigates to the target.
+* **Keyboard Teleoperation:** Drive manually with `W`, `A`, `S`, `D` or Arrow keys; press `Space` to brake.
+* **360° LiDAR Scan Points:** Real-time distance raycasting against the 9 pillars and walls.
+* **Telemetry HUD:** Live readouts of $X, Y$, Heading Yaw ($\theta$), Linear Velocity ($v$), and Angular Velocity ($\omega$).
+
+### Live Synchronization with ROS
+
+You can connect the 3D Web Simulator directly to your running Gazebo simulation:
+1. In your ROS (Docker / WSL / Linux) terminal, launch the ROSBridge server:
+   ```bash
+   roslaunch autonav web_telemetry.launch
+   ```
+2. In the 3D Simulator web panel, turn on the toggle: **Connect Live to ROS (WebSocket)**.
+3. The 3D robot in your browser will mirror the physical/Gazebo TurtleBot3 movement in real-time!
 
 ---
 
@@ -71,36 +123,36 @@ In robotics education, industrial automation, and fleet deployment, relying on h
 |  - Spawns TurtleBot3 Burger in 3D physics environment                                    |
 |  - Publishes: /odom (nav_msgs/Odometry), /scan (sensor_msgs/LaserScan), /tf             |
 +-----------------------------------------------------------------------------------------+
-                                          |
-                                          | /odom (actual pose)
-                                          v
-+-----------------------------------------------------------------------------------------+
-|                                      init_pose.py                                       |
-|  - One-shot subscription to /odom                                                       |
-|  - Constructs PoseWithCovarianceStamped in 'map' frame                                  |
-|  - Publishes to /initialpose (latched + multi-publish)                                  |
-+-----------------------------------------------------------------------------------------+
-                                          |
-                                          | /initialpose
-                                          v
-+-----------------------------------------------------------------------------------------+
-|                                 AMCL (Localization)                                     |
-|  - Aligns particle cloud with robot's true pose                                         |
-|  - Maintains /tf transform: map -> odom                                                 |
-+-----------------------------------------------------------------------------------------+
-                                          ^
-                                          | localization update
-                                          v
-+-----------------------------------------------------------------------------------------+
+       │                                                                   │
+       │ /odom (actual pose)                                               │ /odom, /cmd_vel
+       ▼                                                                   ▼
++-----------------------+                                         +-----------------------+
+|     init_pose.py      |                                         |  3D Web Simulator     |
+|  - One-shot /odom sub |                                         |  - Three.js / WebGL   |
+|  - Frame: 'map'       |                                         |  - Robot FPV Cam (1)  |
+|  - Pub: /initialpose  |                                         |  - Chase Cam (2)      |
++-----------------------+                                         |  - Orbit Cam (3)      |
+       │                                                          |  - Picture-in-Picture |
+       │ /initialpose                                             |  - Click-to-Goal      |
+       ▼                                                          +-----------------------+
++-----------------------+                                                     ▲
+|  AMCL (Localization)  |                                                     │ (Optional)
+|  - Aligns particles   |                                                     │ WebSocket
+|  - TF: map -> odom    |                                                     │ Port 9090
++-----------------------+                                                     │
+       ▲                                                          +-----------------------+
+       │ localization                                             |  rosbridge_websocket  |
+       ▼                                                          |  (web_telemetry)      |
++-----------------------------------------------------------------+-----------------------+
 |                                      goal_pose.py                                       |
 |  - SimpleActionClient for 'move_base'                                                    |
 |  - Constructs MoveBaseGoal (x=2.0, y=0.5, w=1.0) in 'map' frame                         |
 |  - Registers: active_callback, feedback_callback, done_callback (status == 3 check)     |
 |  - Implements on_shutdown cancel hook to halt robot on Ctrl+C                           |
 +-----------------------------------------------------------------------------------------+
-                                          |
-           /move_base/goal                |  /move_base/feedback & /move_base/result
-                                          v
+                                          │
+           /move_base/goal                │  /move_base/feedback & /move_base/result
+                                          ▼
 +-----------------------------------------------------------------------------------------+
 |                                       move_base                                         |
 |  - Global Planner (NavFn / Global Planner): Computes path on Global Costmap             |
@@ -108,9 +160,9 @@ In robotics education, industrial automation, and fleet deployment, relying on h
 |  - Costmaps: Obstacle Layer, Inflation Layer                                            |
 |  - Recovery Behaviors: Rotate in place, clear costmaps                                  |
 +-----------------------------------------------------------------------------------------+
-                                          |
-                                          | /cmd_vel (geometry_msgs/Twist)
-                                          v
+                                          │
+                                          │ /cmd_vel (geometry_msgs/Twist)
+                                          ▼
                                     TurtleBot 3 Moves
 ```
 
@@ -119,18 +171,34 @@ In robotics education, industrial automation, and fleet deployment, relying on h
 ## Package Structure
 
 ```
-catkin_ws/
-└── src/
-    └── autonav/
-        ├── CMakeLists.txt              # Catkin build configuration, scripts and launch install
-        ├── package.xml                 # Package metadata and ROS dependencies
-        ├── launch/
-        │   ├── autonav.launch          # Launch file to run goal_pose with custom coordinates
-        │   └── init_pose.launch        # Launch file for init_pose node
-        ├── scripts/
-        │   ├── init_pose.py            # Node 1: AMCL synchronization node (executable)
-        │   └── goal_pose.py            # Node 2: Navigation action client node (executable)
-        └── README.md                   # Package documentation
+Robotics ESE/
+├── run_simulator.bat                   # Windows 1-click launcher for the 3D Web Simulator
+├── simulator/                          # 3D WebGL Simulation Engine (Three.js)
+│   ├── index.html                      # Complete 3D dashboard interface with WebGL canvas
+│   ├── README.md                       # Simulator usage and control reference
+│   ├── css/
+│   │   └── style.css                   # Glassmorphism dark-mode UI & PiP styling
+│   └── js/
+│       ├── app.js                      # Main controller, camera manager (FPV, Chase, Orbit)
+│       ├── turtlebot3.js               # Procedural 3D TurtleBot3 Burger model & animations
+│       ├── world.js                    # turtlebot3_world 3D layout (9 pillars, walls, grid)
+│       ├── kinematics.js               # Differential drive physics & 360° LiDAR raycasting
+│       ├── navigator.js                # Autonomous pathfinder (move_base behavior)
+│       └── ros_bridge.js               # roslibjs WebSocket connector for live ROS telemetry
+├── catkin_ws/
+│   └── src/
+│       └── autonav/
+│           ├── CMakeLists.txt          # Catkin build configuration, scripts & launch install
+│           ├── package.xml             # Package metadata and ROS dependencies
+│           ├── launch/
+│           │   ├── autonav.launch      # Launch file to run goal_pose with custom coordinates
+│           │   ├── init_pose.launch    # Launch file for init_pose node
+│           │   └── web_telemetry.launch # ROSBridge WebSocket server for the 3D simulator
+│           ├── scripts/
+│           │   ├── init_pose.py        # Node 1: AMCL synchronization node (executable)
+│           │   └── goal_pose.py        # Node 2: Navigation action client node (executable)
+│           └── README.md               # Package documentation
+└── README.md                           # Master repository documentation
 ```
 
 ---
@@ -173,24 +241,24 @@ Key Responsibilities:
 
 ## Prerequisites & System Requirements
 
-- **Operating System:** Ubuntu 18.04 LTS (for ROS Melodic) OR Ubuntu 20.04 LTS (for ROS Noetic)
-- **ROS Version:** ROS Melodic Morenia or ROS Noetic Ninjemys (Desktop-Full install recommended)
-- **TurtleBot3 Packages:**
+- **Operating System:** Ubuntu 18.04 LTS (for ROS Melodic), Ubuntu 20.04 LTS (for ROS Noetic), or Docker container on Windows/WSL
+- **Web Browser:** Chrome, Edge, Firefox, or Safari (WebGL enabled)
+- **TurtleBot3 Packages (Linux):**
   ```bash
-  # For ROS Noetic (Ubuntu 20.04):
+  # For ROS Noetic (Ubuntu 20.04 / Docker):
   sudo apt-get update
-  sudo apt-get install ros-noetic-turtlebot3 ros-noetic-turtlebot3-msgs ros-noetic-turtlebot3-simulations ros-noetic-navigation python-is-python3
+  sudo apt-get install -y ros-noetic-turtlebot3 ros-noetic-turtlebot3-msgs ros-noetic-turtlebot3-simulations ros-noetic-navigation ros-noetic-rosbridge-server python-is-python3
 
   # For ROS Melodic (Ubuntu 18.04):
   sudo apt-get update
-  sudo apt-get install ros-melodic-turtlebot3 ros-melodic-turtlebot3-msgs ros-melodic-turtlebot3-simulations ros-melodic-navigation
+  sudo apt-get install -y ros-melodic-turtlebot3 ros-melodic-turtlebot3-msgs ros-melodic-turtlebot3-simulations ros-melodic-navigation ros-melodic-rosbridge-server
   ```
 
 ---
 
 ## Installation & Build Guide
 
-### Step 1: Open Terminal and Set Robot Model
+### Step 1: Set Robot Model
 Add the TurtleBot3 model definition to your environment:
 ```bash
 export TURTLEBOT3_MODEL=burger
@@ -208,17 +276,9 @@ chmod +x init_pose.py goal_pose.py
 ### Step 3: Build the Workspace
 Return to the root of your catkin workspace and build:
 
-**Using `catkin_make`:**
 ```bash
 cd ~/catkin_ws
 catkin_make
-source devel/setup.bash
-```
-
-**OR Using `catkin build` (if `catkin-tools` is installed):**
-```bash
-cd ~/catkin_ws
-catkin build autonav
 source devel/setup.bash
 ```
 
@@ -226,7 +286,7 @@ source devel/setup.bash
 
 ## Step-by-Step Execution Walkthrough
 
-Follow this sequence across **4 separate terminals** (ensure each terminal sources your workspace: `source ~/catkin_ws/devel/setup.bash`):
+Follow this sequence across your terminals:
 
 ```
 +--------------------------------------------------------------------------+
@@ -246,78 +306,19 @@ Follow this sequence across **4 separate terminals** (ensure each terminal sourc
                                     ▼
 +--------------------------------------------------------------------------+
 |  TERMINAL 3: Synchronize AMCL with Reality via init_pose                 |
+|  $ source ~/catkin_ws/devel/setup.bash                                   |
 |  $ rosrun autonav init_pose.py                                           |
 +--------------------------------------------------------------------------+
                                     │ (Wait for confirmation log)
                                     ▼
 +--------------------------------------------------------------------------+
 |  TERMINAL 4: Dispatch Navigation Goal via goal_pose                      |
+|  $ source ~/catkin_ws/devel/setup.bash                                   |
 |  $ rosrun autonav goal_pose.py                                           |
 +--------------------------------------------------------------------------+
 ```
 
-### Detailed Commands:
-
-#### Terminal 1: Launch Gazebo Simulation
-```bash
-export TURTLEBOT3_MODEL=burger
-roslaunch turtlebot3_gazebo turtlebot3_world.launch
-```
-*Gazebo will launch with the TurtleBot3 Burger in the standard TurtleBot3 world environment.*
-
-#### Terminal 2: Launch TurtleBot3 Navigation Stack & RViz
-```bash
-export TURTLEBOT3_MODEL=burger
-roslaunch turtlebot3_navigation turtlebot3_navigation.launch map_file:=$(rospack find turtlebot3_navigation)/maps/map.yaml
-```
-*This launches AMCL, the global/local costmaps, `move_base`, and RViz with the navigation configuration.*
-
-#### Terminal 3: Run `init_pose.py`
-```bash
-source ~/catkin_ws/devel/setup.bash
-rosrun autonav init_pose.py
-```
-**Expected Console Output:**
-```
-[INFO] [init_pose] Node initialized. Waiting for /odom to retrieve robot pose...
-[INFO] [init_pose] Successfully received initial odometry from /odom.
-[INFO] [init_pose] Synchronizing AMCL initial pose:
-[INFO]              Position:    (x=-2.000, y=-0.500, z=0.000)
-[INFO]              Orientation: (x=0.000, y=0.000, z=0.000, w=1.000)
-[INFO] [init_pose] Waiting for subscribers on /initialpose...
-[INFO] [init_pose] Initial pose successfully published to /initialpose!
-[INFO] [init_pose] AMCL localization synchronization complete.
-```
-*In RViz, you will see the green AMCL particle cloud snap directly around the robot.*
-
-#### Terminal 4: Run `goal_pose.py`
-```bash
-source ~/catkin_ws/devel/setup.bash
-rosrun autonav goal_pose.py
-```
-**Expected Console Output:**
-```
-[INFO] [goal_pose] Initializing goal_pose node...
-[INFO] [goal_pose] Waiting for 'move_base' action server to start...
-[INFO] [goal_pose] Successfully connected to 'move_base' action server.
-============================================================
-[INFO] [goal_pose] Sending target goal:
-[INFO]              Frame:       map
-[INFO]              Target (x,y): (2.00, 0.50)
-[INFO]              Orientation: w=1.00
-============================================================
-[INFO] [goal_pose] [ACTIVE CALLBACK] Goal has been received and is currently being processed by move_base.
-[INFO] [goal_pose] [FEEDBACK] Current Robot Position: (x=-1.85, y=-0.48)
-[INFO] [goal_pose] [FEEDBACK] Current Robot Position: (x=-1.20, y=-0.30)
-...
-[INFO] [goal_pose] [FEEDBACK] Current Robot Position: (x=1.92, y=0.49)
-============================================================
-[INFO] [goal_pose] [DONE CALLBACK] Status 3: SUCCEEDED (Goal target successfully reached!)
-[INFO] [goal_pose] SUCCESS: TurtleBot3 has reached the navigation goal!
-============================================================
-```
-
-#### Passing Custom Coordinates:
+### Passing Custom Target Coordinates:
 You can pass custom goal coordinates using three different methods:
 1. **Direct CLI Arguments:**
    ```bash
@@ -367,15 +368,12 @@ The `done_callback` in `goal_pose.py` intercepts `actionlib_msgs/GoalStatus` enu
 - **Cause:** The `move_base` node is not running or failed to launch due to missing costmap configuration files.
 - **Solution:** Verify Terminal 2 has no red errors. Ensure `export TURTLEBOT3_MODEL=burger` is set in the terminal launching the navigation stack.
 
-### 4. `env: 'python3\r': No such file or directory` (Windows Line Endings)
-- **Cause:** If files were edited on a Windows host and copied to a Linux VM, CRLF line endings may cause bash execution failures.
-- **Solution:** Both scripts are saved with pure UNIX LF line endings. If modified in Windows, convert them inside Linux:
-  ```bash
-  dos2unix catkin_ws/src/autonav/scripts/*.py
-  ```
+### 4. Running the 3D Simulator on Windows
+- If Python is installed, simply double-click `run_simulator.bat`.
+- Alternatively, opening `simulator/index.html` directly in your browser provides full standalone simulation and perspective switching with zero setup.
 
 ---
 
 ## Authors & Maintenance
-Developed as a modular autonomous navigation template for TurtleBot3 ROS 1 (Melodic / Noetic).
+Developed as a modular autonomous navigation template and 3D visualizer for TurtleBot3 ROS 1 (Melodic / Noetic).
 Licensed under the [MIT License](LICENSE).

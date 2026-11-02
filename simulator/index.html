@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TurtleBot 3 Burger - 3D Simulator & Visualizer</title>
+  <link rel="stylesheet" href="css/style.css">
+  
+  <!-- Three.js & OrbitControls via High-Availability CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <!-- roslib.js for optional live ROSBridge connection -->
+  <script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+</head>
+<body>
+  <!-- Main 3D Canvas -->
+  <div id="canvas-container"></div>
+
+  <!-- FPV Center Reticle / Crosshair -->
+  <div id="fpv-crosshair" class="crosshair" style="display: none;"></div>
+
+  <!-- Top Navigation & Perspective Toolbar -->
+  <header id="top-bar" class="glass-panel">
+    <div class="brand">
+      <div class="brand-icon">TB</div>
+      <div>
+        <div class="brand-title">TurtleBot 3 Burger</div>
+        <div class="brand-subtitle">3D Simulator &bull; Autonomous Navigation</div>
+      </div>
+    </div>
+
+    <!-- Perspective Switcher Toolbar -->
+    <div class="camera-toolbar">
+      <button id="btn-cam-fpv" class="cam-btn" title="View world from TurtleBot3's front eye (Shortcut: 1)">
+        <span>👁️ Robot FPV</span>
+        <span class="badge">1</span>
+      </button>
+      <button id="btn-cam-follow" class="cam-btn active" title="Cinematic over-the-shoulder chase camera (Shortcut: 2)">
+        <span>🎥 Follow Cam</span>
+        <span class="badge">2</span>
+      </button>
+      <button id="btn-cam-orbit" class="cam-btn" title="Free 360° mouse orbit, pan, and zoom (Shortcut: 3)">
+        <span>🌐 Orbit View</span>
+        <span class="badge">3</span>
+      </button>
+      <button id="btn-cam-topdown" class="cam-btn" title="Top-down 2D/3D map projection (Shortcut: 4)">
+        <span>🗺️ Top-Down</span>
+        <span class="badge">4</span>
+      </button>
+    </div>
+
+    <!-- Status Badges -->
+    <div class="system-status">
+      <div class="status-pill">
+        <span class="status-dot"></span>
+        <span>SIMULATOR 60 FPS</span>
+      </div>
+      <div id="ros-status-badge" class="status-pill">
+        <span>STANDALONE MODE</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Left Sidebar: Live Telemetry & Robot State -->
+  <aside id="telemetry-panel" class="glass-panel">
+    <div class="panel-heading">
+      <span>Robot Telemetry</span>
+      <span style="font-size: 14px;">📡</span>
+    </div>
+
+    <div class="telemetry-grid">
+      <div class="telem-box">
+        <div class="telem-label">X Position</div>
+        <div id="telem-x" class="telem-val cyan">-2.00</div>
+      </div>
+      <div class="telem-box">
+        <div class="telem-label">Y Position</div>
+        <div id="telem-y" class="telem-val cyan">-0.50</div>
+      </div>
+      <div class="telem-box full-width">
+        <div class="telem-label">Heading / Yaw (&theta;)</div>
+        <div id="telem-yaw" class="telem-val green">0° (0.00 rad)</div>
+      </div>
+      <div class="telem-box">
+        <div class="telem-label">Linear Vel (v)</div>
+        <div id="telem-v" class="telem-val">0.00 m/s</div>
+      </div>
+      <div class="telem-box">
+        <div class="telem-label">Angular Vel (&omega;)</div>
+        <div id="telem-w" class="telem-val">0.00 rad/s</div>
+      </div>
+    </div>
+
+    <!-- Navigation Action Status -->
+    <div class="panel-heading" style="margin-top: 4px;">
+      <span>Navigation ActionLib</span>
+      <span style="font-size: 14px;">🧭</span>
+    </div>
+
+    <div class="nav-status-banner">
+      <span>Status:</span>
+      <span id="nav-badge" class="nav-state-badge idle">IDLE</span>
+    </div>
+    <div id="nav-status-desc" style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); line-height: 1.4;">
+      Ready. Send a target goal or drive using WASD keys.
+    </div>
+
+    <!-- Teleoperation Keyboard Guide -->
+    <div class="panel-heading" style="margin-top: 4px;">
+      <span>Keyboard Teleoperation</span>
+      <span style="font-size: 14px;">🎮</span>
+    </div>
+
+    <div class="teleop-guide">
+      <div style="display: flex; justify-content: center; gap: 4px;">
+        <span id="key-w" class="key-cap">W / &uarr; Forward</span>
+      </div>
+      <div class="teleop-keys">
+        <span id="key-a" class="key-cap">A / &larr; Turn L</span>
+        <span id="key-s" class="key-cap">S / &darr; Back</span>
+        <span id="key-d" class="key-cap">D / &rarr; Turn R</span>
+      </div>
+      <div style="display: flex; justify-content: center; margin-top: 2px;">
+        <span id="key-space" class="key-cap" style="width: 100%; text-align: center;">SPACE &bull; Brake</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Right Sidebar: Autonomous Goal Dispatcher & Settings -->
+  <aside id="control-panel" class="glass-panel">
+    <div class="panel-heading">
+      <span>Dispatch Navigation Goal</span>
+      <span style="font-size: 14px;">🎯</span>
+    </div>
+
+    <!-- Manual Target Input Form -->
+    <div class="form-group">
+      <div class="coord-inputs">
+        <div class="coord-input-wrap">
+          <label>Target X</label>
+          <input type="number" id="input-goal-x" class="coord-input" value="2.0" step="0.1">
+        </div>
+        <div class="coord-input-wrap">
+          <label>Target Y</label>
+          <input type="number" id="input-goal-y" class="coord-input" value="0.5" step="0.1">
+        </div>
+        <div class="coord-input-wrap">
+          <label>Facing W</label>
+          <input type="number" id="input-goal-w" class="coord-input" value="1.0" step="0.1">
+        </div>
+      </div>
+      <div class="button-row">
+        <button id="btn-send-goal" class="btn-primary">
+          <span>🚀 Send Goal</span>
+        </button>
+        <button id="btn-cancel-goal" class="btn-secondary">
+          <span>Cancel</span>
+        </button>
+      </div>
+      <button id="btn-reset-pose" class="btn-secondary" style="width: 100%;">
+        <span>🔄 Reset Robot to Spawn (-2.0, -0.5)</span>
+      </button>
+    </div>
+
+    <!-- Waypoint Presets (Safe Tested Targets) -->
+    <div class="panel-heading" style="margin-top: 4px;">
+      <span>Arena Presets</span>
+      <span style="font-size: 14px;">📍</span>
+    </div>
+
+    <div class="preset-chips">
+      <div class="chip" data-x="2.0" data-y="0.5" data-w="1.0">Default (2.0, 0.5)</div>
+      <div class="chip" data-x="1.5" data-y="1.5" data-w="1.0">Top-Right (1.5, 1.5)</div>
+      <div class="chip" data-x="-1.5" data-y="1.5" data-w="1.0">Top-Left (-1.5, 1.5)</div>
+      <div class="chip" data-x="1.5" data-y="-1.5" data-w="1.0">Bottom-Right (1.5, -1.5)</div>
+      <div class="chip" data-x="-2.0" data-y="-0.5" data-w="1.0">Spawn (-2.0, -0.5)</div>
+    </div>
+
+    <!-- Simulation Settings & Hardware Sensors -->
+    <div class="panel-heading" style="margin-top: 4px;">
+      <span>Sensors & Telemetry</span>
+      <span style="font-size: 14px;">⚙️</span>
+    </div>
+
+    <div class="toggle-row">
+      <span>360° LiDAR Raycast Visuals</span>
+      <label class="switch">
+        <input type="checkbox" id="switch-lidar" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <span>Connect Live to ROS (WebSocket)</span>
+      <label class="switch">
+        <input type="checkbox" id="switch-ros">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="coord-input-wrap" style="margin-top: 2px;">
+      <label>ROSBridge URL</label>
+      <input type="text" id="input-ros-url" class="coord-input" value="ws://localhost:9090" style="font-size: 11px;">
+    </div>
+  </aside>
+
+  <!-- Picture-in-Picture (PiP) Window: Robot Eye Perspective Live Feed -->
+  <div id="pip-container" title="Click to swap camera view (promote to full screen)">
+    <div class="pip-header">
+      <div class="pip-badge">
+        <span class="rec-dot"></span>
+        <span id="pip-label-text">ROBOT FPV</span>
+      </div>
+      <div class="pip-swap-hint">CLICK TO SWAP</div>
+    </div>
+    <canvas id="pip-canvas"></canvas>
+  </div>
+
+  <!-- Bottom Floor Click Hint -->
+  <div id="floor-click-hint">
+    <span>💡 Tip:</span> Click anywhere on the floor arena to dispatch a 2D Navigation Goal
+  </div>
+
+  <!-- Modular Scripts -->
+  <script src="js/turtlebot3.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/kinematics.js"></script>
+  <script src="js/navigator.js"></script>
+  <script src="js/ros_bridge.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
