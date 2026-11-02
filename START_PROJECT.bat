@@ -16,10 +16,13 @@ echo [STEP 1/5] Starting 3D Web Simulator and FPV Visualizer...
 
 where python >nul 2>&1
 if %ERRORLEVEL% equ 0 (
-    start "TurtleBot3 Web Server" /min cmd /c "cd /d "%~dp0simulator" && python -m http.server 8000"
+    set WEB_PORT=8000
+    python -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 8000)); s.close()" >nul 2>&1
+    if !ERRORLEVEL! neq 0 set WEB_PORT=8001
+    start "TurtleBot3 Web Server" /min cmd /c "cd /d "%~dp0simulator" && python -m http.server !WEB_PORT! --bind 127.0.0.1"
     timeout /t 2 /nobreak >nul
-    start "" "http://localhost:8000"
-    echo   [OK] 3D Simulator launched on http://localhost:8000
+    start "" "http://localhost:!WEB_PORT!"
+    echo   [OK] 3D Simulator launched on http://localhost:!WEB_PORT!
 ) else (
     start "" "%~dp0simulator\index.html"
     echo   [OK] 3D Simulator opened directly in default browser
