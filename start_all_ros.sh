@@ -10,7 +10,37 @@ echo "====================================================================="
 echo "       TURTLEBOT 3 BURGER - MASTER SYNCHRONIZED ROS LAUNCHER"
 echo "====================================================================="
 
-# Ensure environment
+# Check if running natively with ROS Noetic installed, or from outside container
+if [ ! -f "/opt/ros/noetic/setup.bash" ]; then
+    echo "[INFO] ROS Noetic was not found on this host (Ubuntu 22.04)."
+    echo "[INFO] ROS Noetic runs inside the Docker container (osrf/ros:noetic-desktop-full)."
+    echo ""
+
+    if command -v docker >/dev/null 2>&1; then
+        echo "[INFO] Attempting to connect to ROS Docker container..."
+        # Try exec into existing running container
+        if docker ps -q --filter "name=turtlebot3_sim" | grep -q .; then
+            echo "[OK] Found running 'turtlebot3_sim' container. Running launcher inside..."
+            exec docker exec -it turtlebot3_sim bash /root/catkin_ws/start_all_ros.sh
+        fi
+
+        # Try starting stopped container
+        if docker ps -a -q --filter "name=turtlebot3_sim" | grep -q .; then
+            echo "[INFO] Starting stopped 'turtlebot3_sim' container..."
+            docker start turtlebot3_sim >/dev/null 2>&1
+            exec docker exec -it turtlebot3_sim bash /root/catkin_ws/start_all_ros.sh
+        fi
+
+        # Spawn new container
+        echo "[INFO] Starting new container 'turtlebot3_sim'..."
+        exec docker run -it --net=host -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix:rw -v "$PWD/catkin_ws:/root/catkin_ws" --name turtlebot3_sim osrf/ros:noetic-desktop-full bash /root/catkin_ws/start_all_ros.sh
+    else
+        echo "[ERROR] Docker is not reachable. Please start Docker Desktop on Windows!"
+        exit 1
+    fi
+fi
+
+# Inside ROS Noetic environment
 source /opt/ros/noetic/setup.bash
 export TURTLEBOT3_MODEL=burger
 
@@ -18,6 +48,8 @@ if [ -f "/root/catkin_ws/devel/setup.bash" ]; then
     source /root/catkin_ws/devel/setup.bash
 elif [ -f "$HOME/catkin_ws/devel/setup.bash" ]; then
     source "$HOME/catkin_ws/devel/setup.bash"
+elif [ -f "./catkin_ws/devel/setup.bash" ]; then
+    source "./catkin_ws/devel/setup.bash"
 fi
 
 echo ""
@@ -49,4 +81,3 @@ rosrun autonav goal_pose.py
 
 # Keep session alive
 wait $NAV_PID
-
