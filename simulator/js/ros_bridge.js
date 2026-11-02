@@ -239,6 +239,95 @@ class ROSBridge {
     console.log('[ROSBridge] Goal dispatched to ROS /move_base_simple/goal:', x, y);
     return true;
   }
+
+  setRobotPose(x, y, yaw = 0.0) {
+    if (!this.connected || !this.ros) {
+      console.warn('[ROSBridge] Cannot set pose to ROS: Bridge not connected.');
+      return false;
+    }
+
+    const qz = Math.sin(yaw / 2.0);
+    const qw = Math.cos(yaw / 2.0);
+
+    // 1. Publish /initialpose for AMCL & RViz
+    try {
+      const initPub = new ROSLIB.Topic({
+        ros: this.ros,
+        name: '/initialpose',
+        messageType: 'geometry_msgs/PoseWithCovarianceStamped'
+      });
+
+      const cov = new Array(36).fill(0);
+      cov[0] = 0.04;
+      cov[7] = 0.04;
+      cov[35] = 0.03;
+
+      const initMsg = new ROSLIB.Message({
+        header: {
+          frame_id: 'map',
+          stamp: { secs: Math.floor(Date.now() / 1000), nsecs: 0 }
+        },
+        pose: {
+          pose: {
+            position: { x: x, y: y, z: 0.0 },
+            orientation: { x: 0.0, y: 0.0, z: qz, w: qw }
+          },
+          covariance: cov
+        }
+      });
+
+      initPub.publish(initMsg);
+      console.log('[ROSBridge] Published /initialpose to AMCL & RViz:', x, y, yaw);
+    } catch (e) {
+      console.warn('[ROSBridge] Error publishing /initialpose:', e);
+    }
+
+    // 2. Teleport physical robot in Gazebo via /gazebo/set_model_state
+    try {
+      const setModelStateClient = new ROSLIB.Service({
+        ros: this.ros,
+        name: '/gazebo/set_model_state',
+        serviceType: 'gazebo_msgs/SetModelState'
+      });
+
+      const request = new ROSLIB.ServiceRequest({
+        model_state: {
+          model_name: 'turtlebot3_burger',
+          pose: {
+            position: { x: x, y: y, z: 0.01 },
+            orientation: { x: 0.0, y: 0.0, z: qz, w: qw }
+          },
+          twist: {
+            linear: { x: 0, y: 0, z: 0 },
+            angular: { x: 0, y: 0, z: 0 }
+          },
+          reference_frame: 'world'
+        }
+      });
+
+      setModelStateClient.callService(request, (result) => {
+        if (result && result.success) {
+          console.log('[ROSBridge] Gazebo robot teleported successfully to:', x, y);
+        }
+      }, (err) => {
+        // Silently skip if service not reachable
+      });
+    } catch (e) {
+      // Silently skip
+    }
+
+    // 3. Clear costmaps
+    try {
+      const clearCostmapsClient = new ROSLIB.Service({
+        ros: this.ros,
+        name: '/move_base/clear_costmaps',
+        serviceType: 'std_srvs/Empty'
+      });
+      clearCostmapsClient.callService(new ROSLIB.ServiceRequest({}), () => {}, () => {});
+    } catch (e) {}
+
+    return true;
+  }
 }
 
 if (typeof window !== 'undefined') {

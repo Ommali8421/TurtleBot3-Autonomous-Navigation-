@@ -38,6 +38,7 @@ include_directories(
 catkin_install_python(PROGRAMS
   scripts/init_pose.py
   scripts/goal_pose.py
+  scripts/set_pose.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

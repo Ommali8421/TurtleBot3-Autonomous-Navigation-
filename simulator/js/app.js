@@ -229,12 +229,39 @@ class App {
       this.navigator.cancelGoal();
     });
 
-    // 5. Reset Robot to Spawn Button
-    document.getElementById('btn-reset-pose').addEventListener('click', () => {
+    // 5. Relocate Robot (Teleport & Synchronize across 3D World + Gazebo + RViz)
+    const relocateRobot = (x, y, yawRad) => {
       this.navigator.cancelGoal();
-      this.kinematics.setPose(-2.0, -0.5, 0.0);
-      this.turtlebot.setPose(-2.0, -0.5, 0.0);
-    });
+      this.kinematics.setPose(x, y, yawRad);
+      this.turtlebot.setPose(x, y, yawRad);
+      if (this.rosBridge && this.rosBridge.connected) {
+        this.rosBridge.setRobotPose(x, y, yawRad);
+      }
+    };
+
+    const btnRelocate = document.getElementById('btn-relocate-robot');
+    if (btnRelocate) {
+      btnRelocate.addEventListener('click', () => {
+        const x = parseFloat(document.getElementById('input-relocate-x').value) || 0.0;
+        const y = parseFloat(document.getElementById('input-relocate-y').value) || 0.0;
+        const yawDeg = parseFloat(document.getElementById('input-relocate-yaw').value) || 0.0;
+        const yawRad = yawDeg * (Math.PI / 180.0);
+        relocateRobot(x, y, yawRad);
+      });
+    }
+
+    const btnReset = document.getElementById('btn-reset-pose');
+    if (btnReset) {
+      btnReset.addEventListener('click', () => {
+        const rx = document.getElementById('input-relocate-x');
+        const ry = document.getElementById('input-relocate-y');
+        const ryaw = document.getElementById('input-relocate-yaw');
+        if (rx) rx.value = -2.0;
+        if (ry) ry.value = -0.5;
+        if (ryaw) ryaw.value = 0.0;
+        relocateRobot(-2.0, -0.5, 0.0);
+      });
+    }
 
     // 6. Quick Waypoint Chips
     document.querySelectorAll('.chip').forEach(chip => {
@@ -318,7 +345,7 @@ class App {
     this.rosBridge.onConnectionChange = (connected, msg) => {
       const badge = document.getElementById('ros-status-badge');
       if (badge) {
-        badge.textContent = connected ? 'ROS CONNECTED (RVIZ SYNC)' : 'STANDALONE';
+        badge.textContent = connected ? 'ROS CONNECTED (GAZEBO & RVIZ SYNC)' : 'STANDALONE 3D WORLD';
         badge.className = connected ? 'status-pill green' : 'status-pill';
       }
       if (connected) {
