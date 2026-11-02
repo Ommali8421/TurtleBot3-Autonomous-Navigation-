@@ -9,15 +9,15 @@ echo     Synchronized 3D FPV + 2D RViz + Gazebo + Navigation Pipeline
 echo =====================================================================
 echo.
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: STEP 1: Launch Local Web Server & 3D Web Simulator
-:: ─────────────────────────────────────────────────────────────────────────
+REM -------------------------------------------------------------------
+REM  STEP 1: Launch Local Web Server and 3D Web Simulator
+REM -------------------------------------------------------------------
 echo [STEP 1/5] Starting 3D Web Simulator and FPV Visualizer...
 
 where python >nul 2>&1
 if %ERRORLEVEL% equ 0 (
-    start "TurtleBot 3 - Local Web Server" /min cmd /c "python -m http.server 8000 --directory \"%~dp0simulator\""
-    timeout /t 1 /nobreak >nul
+    start "TurtleBot3 Web Server" /min cmd /c "cd /d "%~dp0simulator" && python -m http.server 8000"
+    timeout /t 2 /nobreak >nul
     start "" "http://localhost:8000"
     echo   [OK] 3D Simulator launched on http://localhost:8000
 ) else (
@@ -25,9 +25,9 @@ if %ERRORLEVEL% equ 0 (
     echo   [OK] 3D Simulator opened directly in default browser
 )
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: STEP 2: Non-Blocking Fast ROS Environment Detection
-:: ─────────────────────────────────────────────────────────────────────────
+REM -------------------------------------------------------------------
+REM  STEP 2: Non-Blocking Fast ROS Environment Detection
+REM -------------------------------------------------------------------
 echo.
 echo [STEP 2/5] Detecting ROS Noetic Environment...
 
@@ -36,7 +36,7 @@ set TB_MODE=
 set TB_CID=
 set TB_DOCKER_EXE=
 
-:: Run fast non-blocking python probe (timeout protected, will NEVER freeze)
+REM Run fast non-blocking python probe (timeout protected, will NEVER freeze)
 where python >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     for /f "tokens=1,2 delims==" %%a in ('python "%~dp0detect_env.py"') do (
@@ -44,11 +44,14 @@ if %ERRORLEVEL% equ 0 (
     )
 )
 
+echo   [DEBUG] Detected STATUS=!TB_STATUS! MODE=!TB_MODE! CID=!TB_CID!
+
 if "!TB_STATUS!"=="RUNNING" goto CONTAINER_FOUND
 if "!TB_STATUS!"=="STOPPED" goto CONTAINER_STOPPED
 if "!TB_STATUS!"=="NO_CONTAINER" goto SPAWN_CONTAINER
 
-:: Docker is not responding or not currently running
+REM Docker is not responding or not currently running
+echo.
 echo   [NOTICE] Docker Desktop daemon is not currently active or responsive.
 echo.
 echo   ---------------------------------------------------------------------
@@ -71,9 +74,9 @@ if "%CHOICE_VAL%"=="3" goto LAUNCH_WSL_TERMINALS
 if "%CHOICE_VAL%"=="4" goto LAUNCH_CMD_TERMINALS
 if "%CHOICE_VAL%"=="5" goto STANDALONE_MODE
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: Option 1: Start Docker Desktop and Poll Daemon
-:: ─────────────────────────────────────────────────────────────────────────
+REM -------------------------------------------------------------------
+REM  Option 1: Start Docker Desktop and Poll Daemon
+REM -------------------------------------------------------------------
 :START_DOCKER_DESKTOP
 if not "!TB_DOCKER_EXE!"=="" (
     if exist "!TB_DOCKER_EXE!" (
@@ -109,9 +112,9 @@ echo   [WARNING] Docker Desktop took longer than 30s to initialize.
 echo   Falling back to opening pre-configured terminal windows...
 goto LAUNCH_CMD_TERMINALS
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: Option 2: Manual Container ID
-:: ─────────────────────────────────────────────────────────────────────────
+REM -------------------------------------------------------------------
+REM  Option 2: Manual Container ID
+REM -------------------------------------------------------------------
 :MANUAL_CONTAINER_ID
 echo.
 set /p USER_CID="Enter Container ID or Name: "
@@ -121,9 +124,9 @@ set DEXEC=docker exec -it !CID!
 set DEXEC_BG=docker exec !CID!
 goto COMPILE_AND_LAUNCH
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: Flow: Resume Stopped Container
-:: ─────────────────────────────────────────────────────────────────────────
+REM -------------------------------------------------------------------
+REM  Flow: Resume Stopped Container
+REM -------------------------------------------------------------------
 :CONTAINER_STOPPED
 set CID=!TB_CID!
 echo   [INFO] Starting existing container !CID!...
@@ -138,9 +141,9 @@ if "!TB_MODE!"=="WSL" (
 )
 goto COMPILE_AND_LAUNCH
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: Flow: Spawn New ROS Container
-:: ─────────────────────────────────────────────────────────────────────────
+REM -------------------------------------------------------------------
+REM  Flow: Spawn New ROS Container
+REM -------------------------------------------------------------------
 :SPAWN_CONTAINER
 echo   [INFO] Spawning new ROS Noetic container (turtlebot3_sim)...
 docker run -d --name turtlebot3_sim --net=host -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix:rw -v "%~dp0catkin_ws:/root/catkin_ws" osrf/ros:noetic-desktop-full tail -f /dev/null >nul 2>&1
@@ -149,9 +152,9 @@ set DEXEC=docker exec -it !CID!
 set DEXEC_BG=docker exec !CID!
 goto COMPILE_AND_LAUNCH
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: Flow: Connected Container Found
-:: ─────────────────────────────────────────────────────────────────────────
+REM -------------------------------------------------------------------
+REM  Flow: Connected Container Found
+REM -------------------------------------------------------------------
 :CONTAINER_FOUND
 set CID=!TB_CID!
 echo   [OK] Connected to running ROS container: !CID!
@@ -164,47 +167,47 @@ if "!TB_MODE!"=="WSL" (
 )
 goto COMPILE_AND_LAUNCH
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: Build Catkin Workspace and Launch Terminals (Docker Mode)
-:: ─────────────────────────────────────────────────────────────────────────
+REM -------------------------------------------------------------------
+REM  Build Catkin Workspace and Launch Terminals (Docker Mode)
+REM -------------------------------------------------------------------
 :COMPILE_AND_LAUNCH
 echo   [INFO] Verifying Catkin workspace inside container...
 !DEXEC_BG! bash -c "source /opt/ros/noetic/setup.bash && [ -f /root/catkin_ws/devel/setup.bash ] || (cd /root/catkin_ws && catkin_make)" >nul 2>&1
 
-:: Terminal 1: Gazebo Simulation World
+REM Terminal 1: Gazebo Simulation World
 echo.
 echo [STEP 3/5] Starting Terminal 1: Gazebo Simulation World...
-start "Terminal 1: Gazebo 3D Simulation" cmd /k "color 0A && echo =================================================== && echo   TERMINAL 1: GAZEBO 3D SIMULATION WORLD && echo =================================================== && !DEXEC! bash -c \"source /opt/ros/noetic/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch turtlebot3_gazebo turtlebot3_world.launch\""
+start "Terminal 1: Gazebo 3D Simulation" cmd /k "color 0A && echo TERMINAL 1: GAZEBO 3D SIMULATION WORLD && echo ================================================= && !DEXEC! bash -c \"source /opt/ros/noetic/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch turtlebot3_gazebo turtlebot3_world.launch\""
 
 echo   [WAIT] Waiting 8 seconds for Gazebo physics and roscore to initialize...
 timeout /t 8 /nobreak >nul
 
-:: Terminal 2: Navigation Stack, 2D RViz View, and ROSBridge
+REM Terminal 2: Navigation Stack, 2D RViz View, and ROSBridge
 echo.
 echo [STEP 4/5] Starting Terminal 2: Navigation Stack, 2D RViz, and ROSBridge...
-start "Terminal 2: Navigation and 2D RViz" cmd /k "color 0B && echo =================================================== && echo   TERMINAL 2: NAVIGATION STACK, 2D RVIZ, ROSBRIDGE && echo =================================================== && !DEXEC! bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && export TURTLEBOT3_MODEL=burger && (roslaunch autonav navigation_with_bridge.launch || roslaunch turtlebot3_navigation turtlebot3_navigation.launch map_file:=/opt/ros/noetic/share/turtlebot3_navigation/maps/map.yaml)\""
+start "Terminal 2: Navigation and 2D RViz" cmd /k "color 0B && echo TERMINAL 2: NAVIGATION STACK, 2D RVIZ, ROSBRIDGE && echo ================================================= && !DEXEC! bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && export TURTLEBOT3_MODEL=burger && (roslaunch autonav navigation_with_bridge.launch || roslaunch turtlebot3_navigation turtlebot3_navigation.launch map_file:=/opt/ros/noetic/share/turtlebot3_navigation/maps/map.yaml)\""
 
 echo   [WAIT] Waiting 12 seconds for AMCL localization and costmaps to initialize...
 timeout /t 12 /nobreak >nul
 
-:: Step 5: Terminals 3 and 4
+REM Step 5: Terminals 3 and 4
 echo.
 echo [STEP 5/5] Launching Synchronized AMCL Initialization and Goal Navigation...
 
-:: Terminal 3: AMCL Initial Pose Synchronization
-start "Terminal 3: AMCL Localization Sync" cmd /k "color 0E && echo =================================================== && echo   TERMINAL 3: AMCL LOCALIZATION SYNCHRONIZATION && echo =================================================== && !DEXEC! bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav init_pose.py\""
+REM Terminal 3: AMCL Initial Pose Synchronization
+start "Terminal 3: AMCL Localization Sync" cmd /k "color 0E && echo TERMINAL 3: AMCL LOCALIZATION SYNCHRONIZATION && echo ================================================= && !DEXEC! bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav init_pose.py\""
 
 echo   [WAIT] Waiting 4 seconds for AMCL particle cloud to converge...
 timeout /t 4 /nobreak >nul
 
-:: Terminal 4: Autonomous Goal Pose Action Client
-start "Terminal 4: Autonomous Goal Navigation" cmd /k "color 0D && echo =================================================== && echo   TERMINAL 4: AUTONOMOUS GOAL ACTION CLIENT && echo =================================================== && !DEXEC! bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav goal_pose.py\""
+REM Terminal 4: Autonomous Goal Pose Action Client
+start "Terminal 4: Autonomous Goal Navigation" cmd /k "color 0D && echo TERMINAL 4: AUTONOMOUS GOAL ACTION CLIENT && echo ================================================= && !DEXEC! bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav goal_pose.py\""
 
 goto LAUNCH_SUCCESS
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: Option 3: Launch Native WSL / Ubuntu Terminals
-:: ─────────────────────────────────────────────────────────────────────────
+REM -------------------------------------------------------------------
+REM  Option 3: Launch Native WSL / Ubuntu Terminals
+REM -------------------------------------------------------------------
 :LAUNCH_WSL_TERMINALS
 echo.
 echo [STEP 3/5] Starting Terminal 1: Gazebo Simulation World in WSL...
@@ -229,26 +232,26 @@ start "Terminal 4: Autonomous Goal Action Client (WSL)" wsl -e bash -c "source /
 
 goto LAUNCH_SUCCESS
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: Option 4: Launch Pre-Configured Command Windows
-:: ─────────────────────────────────────────────────────────────────────────
+REM -------------------------------------------------------------------
+REM  Option 4: Launch Pre-Configured Command Windows
+REM -------------------------------------------------------------------
 :LAUNCH_CMD_TERMINALS
 echo.
-echo [INFO] Spawning 4 pre-configured terminal windows...
+echo [INFO] Spawning 4 pre-configured terminal windows with instructions...
 
-start "Terminal 1: Gazebo Simulation" cmd /k "color 0A && echo =================================================== && echo   TERMINAL 1: GAZEBO 3D SIMULATION && echo   Command: docker exec -it $(docker ps -q -l) bash -c \"source /opt/ros/noetic/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch turtlebot3_gazebo turtlebot3_world.launch\" && echo ==================================================="
+start "Terminal 1: Gazebo Simulation" cmd /k "color 0A && echo TERMINAL 1: GAZEBO 3D SIMULATION && echo ================================================= && echo Run: docker exec -it CONTAINER_ID bash -c \"source /opt/ros/noetic/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch turtlebot3_gazebo turtlebot3_world.launch\""
 
-start "Terminal 2: Navigation & RViz" cmd /k "color 0B && echo =================================================== && echo   TERMINAL 2: NAVIGATION STACK, 2D RVIZ, ROSBRIDGE && echo   Command: docker exec -it $(docker ps -q -l) bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch autonav navigation_with_bridge.launch\" && echo ==================================================="
+start "Terminal 2: Navigation" cmd /k "color 0B && echo TERMINAL 2: NAVIGATION STACK, 2D RVIZ, ROSBRIDGE && echo ================================================= && echo Run: docker exec -it CONTAINER_ID bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch autonav navigation_with_bridge.launch\""
 
-start "Terminal 3: AMCL Sync" cmd /k "color 0E && echo =================================================== && echo   TERMINAL 3: AMCL LOCALIZATION SYNCHRONIZATION && echo   Command: docker exec -it $(docker ps -q -l) bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav init_pose.py\" && echo ==================================================="
+start "Terminal 3: AMCL Sync" cmd /k "color 0E && echo TERMINAL 3: AMCL LOCALIZATION SYNCHRONIZATION && echo ================================================= && echo Run: docker exec -it CONTAINER_ID bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav init_pose.py\""
 
-start "Terminal 4: Goal Dispatcher" cmd /k "color 0D && echo =================================================== && echo   TERMINAL 4: AUTONOMOUS GOAL ACTION CLIENT && echo   Command: docker exec -it $(docker ps -q -l) bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav goal_pose.py\" && echo ==================================================="
+start "Terminal 4: Goal Dispatcher" cmd /k "color 0D && echo TERMINAL 4: AUTONOMOUS GOAL ACTION CLIENT && echo ================================================= && echo Run: docker exec -it CONTAINER_ID bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav goal_pose.py\""
 
 goto LAUNCH_SUCCESS
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: Success Notification
-:: ─────────────────────────────────────────────────────────────────────────
+REM -------------------------------------------------------------------
+REM  Success Notification
+REM -------------------------------------------------------------------
 :LAUNCH_SUCCESS
 echo.
 echo =====================================================================
@@ -264,9 +267,9 @@ echo.
 pause
 exit /b
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: Standalone Mode
-:: ─────────────────────────────────────────────────────────────────────────
+REM -------------------------------------------------------------------
+REM  Standalone Mode
+REM -------------------------------------------------------------------
 :STANDALONE_MODE
 echo.
 echo   [OK] 3D Web Simulator is running at http://localhost:8000
