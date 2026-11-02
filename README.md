@@ -111,31 +111,31 @@ bash start_all_ros.sh
 
 ### Method 2: Multi-Terminal Commands Using Docker (Windows PowerShell / CMD)
 
-If you are running the ROS container in Docker on Windows, open **4 separate PowerShell or CMD windows** and run these commands:
+Make sure **Docker Desktop** is running. Open **4 separate PowerShell or Command Prompt windows** and run these commands:
 
 #### Terminal 1: Launch Gazebo Simulation World
 ```powershell
-docker exec -it $(docker ps -q -l) bash -c "source /opt/ros/noetic/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch turtlebot3_gazebo turtlebot3_world.launch"
+docker exec -it turtlebot3_sim bash -c "source /opt/ros/noetic/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch turtlebot3_gazebo turtlebot3_world.launch"
 ```
-*(Wait ~8 seconds until Gazebo spawns the robot in the arena).*
+*(Wait ~8 seconds until Gazebo spawns the robot at `(-2.0, -0.5)` in the arena).*
 
 #### Terminal 2: Launch Navigation Stack, 2D RViz View, and ROSBridge
 ```powershell
-docker exec -it $(docker ps -q -l) bash -c "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch autonav navigation_with_bridge.launch"
+docker exec -it turtlebot3_sim bash -c "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch autonav navigation_with_bridge.launch"
 ```
-*(Wait ~12 seconds until RViz displays the 2D map and costmaps. The 3D browser visualizer will turn green: "ROS CONNECTED").*
+*(Wait ~10 seconds until RViz displays the 2D map and costmaps. The 3D browser visualizer at `http://localhost:8001` will display: "ROS CONNECTED (GAZEBO & RVIZ SYNC)").*
 
-#### Terminal 3: Synchronize AMCL Initial Pose
+#### Terminal 3: Synchronize AMCL Initial Pose & Gazebo Location
 ```powershell
-docker exec -it $(docker ps -q -l) bash -c "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav init_pose.py"
+docker exec -it turtlebot3_sim bash -c "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav set_pose.py -2.0 -0.5 0.0"
 ```
-*(You will see the green AMCL particle cloud in RViz snap tightly around the robot).*
+*(Or simply double-click `SET_LOCATION.bat` from Windows. This synchronizes Gazebo, AMCL, and costmaps tightly).*
 
 #### Terminal 4: Dispatch Autonomous Navigation Goal
 ```powershell
-docker exec -it $(docker ps -q -l) bash -c "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav goal_pose.py"
+docker exec -it turtlebot3_sim bash -c "source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav goal_pose.py"
 ```
-*(TurtleBot3 will navigate smoothly past the 1st, 2nd, and 3rd obstacles, streaming live coordinates until `Status 3: SUCCEEDED`!)*
+*(TurtleBot3 will navigate smoothly past obstacles, streaming live coordinates until `Status 3: SUCCEEDED`!)*
 
 ---
 
