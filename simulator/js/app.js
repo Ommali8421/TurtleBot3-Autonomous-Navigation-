@@ -327,15 +327,26 @@ class App {
       }
     };
 
-    this.rosBridge.onPoseReceived = (x, y, yaw, isOdom = false) => {
+    this.lastGazeboPoseTime = 0;
+    this.lastMapPoseTime = 0;
+
+    this.rosBridge.onPoseReceived = (x, y, yaw, source = 'amcl') => {
       const now = Date.now();
-      if (!isOdom) {
-        // High priority: exact map-frame localized pose from AMCL / move_base (matching RViz)
-        this.lastMapPoseTime = now;
+      if (source === 'gazebo') {
+        // Absolute highest priority: 100% ground truth from Gazebo physics simulation
+        this.lastGazeboPoseTime = now;
         this.kinematics.setPose(x, y, yaw);
-      } else if (now - this.lastMapPoseTime > 2000) {
-        // Fallback: raw odometry only if no AMCL pose received yet
-        this.kinematics.setPose(x, y, yaw);
+      } else if (source === 'amcl' || source === 'feedback') {
+        // AMCL or move_base feedback in map frame (if Gazebo states not streaming)
+        if (now - this.lastGazeboPoseTime > 1000) {
+          this.lastMapPoseTime = now;
+          this.kinematics.setPose(x, y, yaw);
+        }
+      } else if (source === 'odom') {
+        // Fallback: raw odometry offset by Gazebo spawn location (-2.0, -0.5)
+        if (now - this.lastGazeboPoseTime > 2000 && now - this.lastMapPoseTime > 2000) {
+          this.kinematics.setPose(x - 2.0, y - 0.5, yaw);
+        }
       }
     };
 

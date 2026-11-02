@@ -1,9 +1,9 @@
 /**
  * ROSBridge WebSocket Connector (roslibjs)
  * Synchronizes the 3D Web Simulator live with real ROS Melodic / Noetic:
- * - Subscribes to /amcl_pose (the EXACT map-frame localized pose shown in RViz)
+ * - Subscribes to /gazebo/model_states (100% ground-truth physics sync from Gazebo)
+ * - Subscribes to /amcl_pose (the localized map-frame pose from RViz)
  * - Subscribes to /move_base/feedback (real-time trajectory updates during navigation)
- * - Subscribes to /odom (continuous odometry fallback)
  * - Subscribes to /cmd_vel (drives wheel animations and speed telemetries)
  * - Subscribes to /move_base_simple/goal & /move_base/current_goal (mirrors RViz goals)
  * - Auto-reconnection logic so it links automatically as soon as ROS starts
@@ -18,6 +18,7 @@ class ROSBridge {
     this.retryTimer = null;
 
     // Subscriptions & Publishers
+    this.gazeboSub = null;
     this.amclSub = null;
     this.feedbackSub = null;
     this.odomSub = null;
@@ -113,7 +114,30 @@ class ROSBridge {
       return Math.atan2(siny_cosp, cosy_cosp);
     };
 
-    // ─── 1. Subscribe to /amcl_pose (The exact pose rendered in RViz) ───
+    // ─── 1. Subscribe to /gazebo/model_states (100% Ground Truth from Gazebo Simulation) ───
+    this.gazeboSub = new ROSLIB.Topic({
+      ros: this.ros,
+      name: '/gazebo/model_states',
+      messageType: 'gazebo_msgs/ModelStates'
+    });
+
+    this.gazeboSub.subscribe((msg) => {
+      if (!msg.name || !msg.pose) return;
+      let idx = msg.name.indexOf('turtlebot3_burger');
+      if (idx === -1) {
+        idx = msg.name.findIndex(n => n.includes('turtlebot') || n.includes('burger'));
+      }
+
+      if (idx !== -1 && msg.pose[idx]) {
+        const p = msg.pose[idx].position;
+        const yaw = extractYaw(msg.pose[idx].orientation);
+        if (this.onPoseReceived) {
+          this.onPoseReceived(p.x, p.y, yaw, 'gazebo');
+        }
+      }
+    });
+
+    // ─── 2. Subscribe to /amcl_pose (The exact pose rendered in RViz) ───
     this.amclSub = new ROSLIB.Topic({
       ros: this.ros,
       name: '/amcl_pose',
@@ -124,11 +148,11 @@ class ROSBridge {
       const pos = msg.pose.pose.position;
       const yaw = extractYaw(msg.pose.pose.orientation);
       if (this.onPoseReceived) {
-        this.onPoseReceived(pos.x, pos.y, yaw);
+        this.onPoseReceived(pos.x, pos.y, yaw, 'amcl');
       }
     });
 
-    // ─── 2. Subscribe to /move_base/feedback (Real-time tracking from planner) ───
+    // ─── 3. Subscribe to /move_base/feedback (Real-time tracking from planner) ───
     this.feedbackSub = new ROSLIB.Topic({
       ros: this.ros,
       name: '/move_base/feedback',
@@ -139,11 +163,11 @@ class ROSBridge {
       const pos = msg.feedback.base_position.pose.position;
       const yaw = extractYaw(msg.feedback.base_position.pose.orientation);
       if (this.onPoseReceived) {
-        this.onPoseReceived(pos.x, pos.y, yaw);
+        this.onPoseReceived(pos.x, pos.y, yaw, 'feedback');
       }
     });
 
-    // ─── 3. Subscribe to /odom (Fallback high-frequency odometry) ───
+    // ─── 4. Subscribe to /odom (Continuous odometry fallback) ───
     this.odomSub = new ROSLIB.Topic({
       ros: this.ros,
       name: '/odom',
@@ -151,15 +175,14 @@ class ROSBridge {
     });
 
     this.odomSub.subscribe((msg) => {
-      // Only use /odom if AMCL or move_base feedback hasn't arrived recently
       const pos = msg.pose.pose.position;
       const yaw = extractYaw(msg.pose.pose.orientation);
       if (this.onPoseReceived) {
-        this.onPoseReceived(pos.x, pos.y, yaw, /* isOdom */ true);
+        this.onPoseReceived(pos.x, pos.y, yaw, 'odom');
       }
     });
 
-    // ─── 4. Subscribe to /cmd_vel (For wheel rotation speed) ───
+    // ─── 5. Subscribe to /cmd_vel (For wheel rotation speed) ───
     this.cmdVelSub = new ROSLIB.Topic({
       ros: this.ros,
       name: '/cmd_vel',
@@ -172,7 +195,7 @@ class ROSBridge {
       }
     });
 
-    // ─── 5. Subscribe to /move_base_simple/goal (Mirror RViz 2D Nav Goal beacon) ───
+    // ─── 6. Subscribe to /move_base_simple/goal (Mirror RViz 2D Nav Goal beacon) ───
     this.goalSub = new ROSLIB.Topic({
       ros: this.ros,
       name: '/move_base_simple/goal',
@@ -187,7 +210,7 @@ class ROSBridge {
       }
     });
 
-    // ─── 6. Publisher for /move_base_simple/goal ───
+    // ─── 7. Publisher for /move_base_simple/goal ───
     this.goalPub = new ROSLIB.Topic({
       ros: this.ros,
       name: '/move_base_simple/goal',

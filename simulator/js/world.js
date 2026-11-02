@@ -1,8 +1,8 @@
 /**
  * turtlebot3_world - 3D Environment & Arena Layout
- * Faithfully reproduces the official Gazebo turtlebot3_world:
- * - 9 cylindrical obstacle pillars (symmetrical distribution)
- * - Outer boundary walls (5m x 5m arena)
+ * Exact 1:1 replica of the official Gazebo turtlebot3_world:
+ * - 9 cylindrical obstacle pillars (3x3 grid at x,y in {-1.1, 0.0, 1.1}, radius 0.15m)
+ * - Outer boundary walls and 4 outer columns matching Gazebo model.sdf
  * - 1-meter precision floor grid with coordinate markings
  * - Dynamic lighting and shadows
  */
@@ -12,23 +12,31 @@ class World {
     this.scene = scene;
     this.obstacles = []; // Collision cylinders and wall planes
 
-    this.pillarRadius = 0.16; // 16 cm radius
+    // Exact Gazebo specifications from turtlebot3_world/model.sdf
+    this.pillarRadius = 0.15; // 15 cm radius
     this.pillarHeight = 0.50; // 50 cm tall
     this.arenaSize = 5.0;     // 5m x 5m
+
+    // Boundary limits
+    this.boundaryMinX = -2.45;
+    this.boundaryMaxX = 2.45;
+    this.boundaryMinY = -2.45;
+    this.boundaryMaxY = 2.45;
 
     this.buildLighting();
     this.buildFloor();
     this.buildPillars();
+    this.buildOuterColumns();
     this.buildBoundaryWalls();
     this.buildCoordinateAxes();
   }
 
   buildLighting() {
     // Ambient light for base visibility
-    const ambient = new THREE.AmbientLight(0xffffff, 0.45);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     this.scene.add(ambient);
 
-    // Directional sunlight casting crisp shadows
+    // Directional sunlight casting shadows
     const sun = new THREE.DirectionalLight(0xddeeff, 0.85);
     sun.position.set(4, 7, 3);
     sun.castShadow = true;
@@ -43,12 +51,12 @@ class World {
     sun.shadow.bias = -0.0005;
     this.scene.add(sun);
 
-    // Subtle blue point lights around the arena for sci-fi robotics atmosphere
-    const light1 = new THREE.PointLight(0x00f0ff, 0.4, 6);
+    // Subtle blue point lights around arena
+    const light1 = new THREE.PointLight(0x00f0ff, 0.35, 8);
     light1.position.set(-2.2, 1.5, -2.2);
     this.scene.add(light1);
 
-    const light2 = new THREE.PointLight(0x0077ff, 0.4, 6);
+    const light2 = new THREE.PointLight(0x0077ff, 0.35, 8);
     light2.position.set(2.2, 1.5, 2.2);
     this.scene.add(light2);
   }
@@ -79,24 +87,24 @@ class World {
   }
 
   buildPillars() {
-    // Official TurtleBot3 World 9 Pillars layout
+    // Exact Gazebo 3x3 Grid of 9 Cylinders from turtlebot3_world/model.sdf
     const pillarPositions = [
-      { x:  0.00, y:  0.00 }, // Center
-      { x:  1.25, y:  1.25 }, // Top Right
-      { x: -1.25, y:  1.25 }, // Top Left
-      { x:  1.25, y: -1.25 }, // Bottom Right
-      { x: -1.25, y: -1.25 }, // Bottom Left
-      { x:  1.75, y:  0.00 }, // East
-      { x: -1.75, y:  0.00 }, // West
-      { x:  0.00, y:  1.75 }, // North
-      { x:  0.00, y: -1.75 }  // South
+      { name: 'one_one',    x: -1.1, y: -1.1 },
+      { name: 'one_two',    x: -1.1, y:  0.0 },
+      { name: 'one_three',  x: -1.1, y:  1.1 },
+      { name: 'two_one',    x:  0.0, y: -1.1 },
+      { name: 'two_two',    x:  0.0, y:  0.0 }, // Center
+      { name: 'two_three',  x:  0.0, y:  1.1 },
+      { name: 'three_one',  x:  1.1, y: -1.1 },
+      { name: 'three_two',  x:  1.1, y:  0.0 },
+      { name: 'three_three',x:  1.1, y:  1.1 }
     ];
 
     const pillarGeo = new THREE.CylinderGeometry(this.pillarRadius, this.pillarRadius, this.pillarHeight, 32);
     const pillarMat = new THREE.MeshStandardMaterial({
-      color: 0x24324d,
-      roughness: 0.4,
-      metalness: 0.6
+      color: 0x283854,
+      roughness: 0.35,
+      metalness: 0.65
     });
 
     const pillarRimMat = new THREE.MeshBasicMaterial({
@@ -104,15 +112,15 @@ class World {
       wireframe: true
     });
 
-    pillarPositions.forEach((pos, idx) => {
+    pillarPositions.forEach((pos) => {
       const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-      // Map coords: (x, y) -> Three.js (x, -y)
+      // Map coords: (x, y) -> Three.js (x, y_elevation, -y)
       pillar.position.set(pos.x, this.pillarHeight / 2, -pos.y);
       pillar.castShadow = true;
       pillar.receiveShadow = true;
 
-      // Decorative cyan ring on top of each pillar
-      const ringGeo = new THREE.TorusGeometry(this.pillarRadius, 0.006, 8, 32);
+      // Decorative cyan ring on top
+      const ringGeo = new THREE.TorusGeometry(this.pillarRadius, 0.005, 8, 32);
       ringGeo.rotateX(Math.PI / 2);
       const ring = new THREE.Mesh(ringGeo, pillarRimMat);
       ring.position.y = this.pillarHeight / 2 + 0.001;
@@ -120,12 +128,46 @@ class World {
 
       this.scene.add(pillar);
 
-      // Register for collision & LiDAR raycasting
+      // Register obstacle for collision & LiDAR raycasting
       this.obstacles.push({
         type: 'cylinder',
+        name: pos.name,
         x: pos.x,
         y: pos.y,
         radius: this.pillarRadius
+      });
+    });
+  }
+
+  buildOuterColumns() {
+    // Gazebo 4 outer hexagonal accent markers from model.sdf
+    const outerPositions = [
+      { x:  1.8, y:  2.4 },
+      { x:  1.8, y: -2.4 },
+      { x: -1.8, y:  2.4 },
+      { x: -1.8, y: -2.4 }
+    ];
+
+    const colGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.40, 6); // Hexagonal column
+    const colMat = new THREE.MeshStandardMaterial({
+      color: 0x1f2b42,
+      roughness: 0.5,
+      metalness: 0.5
+    });
+
+    outerPositions.forEach(pos => {
+      const col = new THREE.Mesh(colGeo, colMat);
+      col.position.set(pos.x, 0.20, -pos.y);
+      col.castShadow = true;
+      col.receiveShadow = true;
+      this.scene.add(col);
+
+      this.obstacles.push({
+        type: 'cylinder',
+        name: 'outer_column',
+        x: pos.x,
+        y: pos.y,
+        radius: 0.12
       });
     });
   }
@@ -160,48 +202,28 @@ class World {
 
     wallsData.forEach(w => {
       const wallGeo = new THREE.BoxGeometry(w.width, wallHeight, w.depth);
-      const wallMesh = new THREE.Mesh(wallGeo, wallMat);
-      wallMesh.position.set(w.x, wallHeight / 2, w.z);
-      wallMesh.castShadow = true;
-      wallMesh.receiveShadow = true;
+      const wall = new THREE.Mesh(wallGeo, wallMat);
+      wall.position.set(w.x, wallHeight / 2, w.z);
+      wall.castShadow = true;
+      wall.receiveShadow = true;
+      this.scene.add(wall);
 
-      // Glowing top border line
-      const lineGeo = new THREE.BoxGeometry(w.width, 0.015, w.depth);
-      const lineMesh = new THREE.Mesh(lineGeo, borderGlowMat);
-      lineMesh.position.set(w.x, wallHeight + 0.005, w.z);
-
-      this.scene.add(wallMesh);
-      this.scene.add(lineMesh);
+      // Subtle cyan border trim along the top edge of each wall
+      const trimGeo = new THREE.BoxGeometry(w.width, 0.015, w.depth);
+      const trim = new THREE.Mesh(trimGeo, borderGlowMat);
+      trim.position.set(w.x, wallHeight + 0.005, w.z);
+      this.scene.add(trim);
     });
-
-    // Outer boundary collision bounds
-    this.boundaryMinX = -halfSize + wallThickness / 2;
-    this.boundaryMaxX =  halfSize - wallThickness / 2;
-    this.boundaryMinY = -halfSize + wallThickness / 2;
-    this.boundaryMaxY =  halfSize - wallThickness / 2;
   }
 
   buildCoordinateAxes() {
-    // Custom visible coordinate axes at origin
-    // +X (Red = East), +Y (Green = North in map)
-    const axisLen = 0.8;
-    const xGeo = new THREE.CylinderGeometry(0.008, 0.008, axisLen, 12);
-    xGeo.rotateZ(-Math.PI / 2);
-    const xMat = new THREE.MeshBasicMaterial({ color: 0xff3355 });
-    const xAxis = new THREE.Mesh(xGeo, xMat);
-    xAxis.position.set(axisLen / 2, 0.01, 0);
-    this.scene.add(xAxis);
-
-    const yGeo = new THREE.CylinderGeometry(0.008, 0.008, axisLen, 12);
-    yGeo.rotateX(Math.PI / 2);
-    const yMat = new THREE.MeshBasicMaterial({ color: 0x00ff88 });
-    const yAxis = new THREE.Mesh(yGeo, yMat);
-    yAxis.position.set(0, 0.01, -axisLen / 2); // -Z in Three.js is +Y in ROS map
-    this.scene.add(yAxis);
+    // Origin coordinate axes marker (Red=X forward/east, Green=Z up, Blue=Y left/north)
+    const axes = new THREE.AxesHelper(0.5);
+    axes.position.set(0, 0.005, 0);
+    this.scene.add(axes);
   }
 }
 
 if (typeof window !== 'undefined') {
   window.World = World;
 }
-
