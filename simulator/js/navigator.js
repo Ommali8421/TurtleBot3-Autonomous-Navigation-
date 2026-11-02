@@ -1,10 +1,10 @@
 /**
  * Autonomous Navigation Manager for TurtleBot 3 (move_base behavior)
- * - Full A* (A-Star) Multi-Obstacle Grid Planner:
- *     Guarantees smooth routing around the 1st, 2nd, and 3rd pillars without getting stuck.
- * - String-pulling path smoothing (eliminates grid artifacts into clean straight vectors).
- * - Dynamic Pure Pursuit trajectory tracker with arrival deceleration.
- * - Status codes & done callbacks (status 3 == SUCCEEDED).
+ * - Full A* (A-Star) Multi-Obstacle Grid Planner with 8cm fine resolution
+ * - Strict Line-of-Sight String-Pulling Shortcut Algorithm (Never clips through obstacles)
+ * - Dynamic Pure Pursuit trajectory tracker with lookahead heading correction
+ * - Active Reactive Obstacle Repulsion (APF): dynamically steers clear of any pillar within 36cm
+ * - Status codes & done callbacks (status 3 == SUCCEEDED)
  */
 
 class Navigator {
@@ -19,8 +19,14 @@ class Navigator {
     this.currentWpIndex = 0;
 
     // Tolerances
-    this.xyTolerance = 0.10;   // 10 cm goal arrival tolerance
+    this.xyTolerance = 0.12;   // 12 cm goal arrival tolerance
     this.yawTolerance = 0.14;  // ~8 degrees orientation tolerance
+    this.wpAdvanceDist = 0.14; // Advance to next WP when within 14 cm
+
+    // Safety margins (Pillar radius = 0.16m, Robot radius = 0.11m -> Min physical contact = 0.27m)
+    this.plannerClearance = 0.32;   // 32 cm clearance for A* grid (total 48 cm from pillar center)
+    this.shortcutClearance = 0.28;  // 28 cm clearance for line-of-sight checks (total 44 cm)
+    this.repulsionDist = 0.36;      // Active reactive repulsion triggers if within 36 cm of a pillar
 
     // Visual Path Ribbon & Goal Beacon
     this.pathLine = null;
@@ -32,8 +38,8 @@ class Navigator {
     this.onFeedback = null;
     this.lastFeedbackTime = 0;
 
-    // A* Grid Cache (resolution = 0.1m, bounds = [-2.4, 2.4])
-    this.gridRes = 0.10; // 10 cm cell size
+    // Fine-resolution A* Grid (resolution = 0.08m = 8 cm, bounds = [-2.4, 2.4])
+    this.gridRes = 0.08;
     this.gridMin = -2.4;
     this.gridMax = 2.4;
     this.gridDim = Math.round((this.gridMax - this.gridMin) / this.gridRes);
@@ -96,10 +102,10 @@ class Navigator {
     }
 
     this.target = { x, y, yaw: targetYaw };
-    this.setState('PLANNING', 'Computing multi-obstacle A* path...');
+    this.setState('PLANNING', 'Computing collision-free A* path...');
 
     // 1. Check if target is out of bounds or inside an obstacle
-    if (this.isObstacle(x, y, 0.22)) {
+    if (this.isObstacle(x, y, 0.20)) {
       this.setState('ABORTED', 'Target goal is inside an obstacle or wall!');
       this.goalBeacon.visible = false;
       this.clearPath();
@@ -113,7 +119,7 @@ class Navigator {
       return false;
     }
 
-    // 3. Smooth the path using line-of-sight shortcutting
+    // 3. Smooth the path using strict line-of-sight shortcutting (stops on any obstacle)
     this.waypoints = this.smoothPath(rawPath);
     this.currentWpIndex = 0;
 
@@ -159,8 +165,8 @@ class Navigator {
     const dy = currentWp.y - this.kinematics.y;
     const dist = Math.hypot(dx, dy);
 
-    // If reached intermediate waypoint, move to next
-    if (dist < 0.20 && this.currentWpIndex < this.waypoints.length - 1) {
+    // If reached intermediate waypoint, advance to next
+    if (dist < this.wpAdvanceDist && this.currentWpIndex < this.waypoints.length - 1) {
       this.currentWpIndex++;
       this.updatePathVisuals();
       return;
@@ -172,22 +178,57 @@ class Navigator {
       return;
     }
 
-    // Pure Pursuit Steering Controller
+    // ─── 1. Pure Pursuit Heading Calculation ───
     const targetAngle = Math.atan2(dy, dx);
     let angleDiff = targetAngle - this.kinematics.yaw;
     while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
     while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
 
-    // Angular velocity with smooth damping
-    this.kinematics.cmdAngular = Math.max(-this.kinematics.maxAngularVel, Math.min(this.kinematics.maxAngularVel, angleDiff * 3.2));
+    // ─── 2. Active Real-Time Obstacle Repulsion (APF Safety Field) ───
+    let repulseSteer = 0.0;
+    let minObsDist = Infinity;
 
-    // Linear speed: slow down when turning sharply or nearing intermediate turns
-    if (Math.abs(angleDiff) > 0.5) {
-      this.kinematics.cmdLinear = 0.04; // Slow rotation to turn corners
+    for (const obs of this.world.obstacles) {
+      const ox = this.kinematics.x - obs.x;
+      const oy = this.kinematics.y - obs.y;
+      const d = Math.hypot(ox, oy) - obs.radius - this.kinematics.robotRadius;
+
+      if (d < minObsDist) minObsDist = d;
+
+      // If within repulsion bubble (~25 cm from surface)
+      if (d < 0.25) {
+        // Angle from robot to obstacle
+        const obsAngle = Math.atan2(obs.y - this.kinematics.y, obs.x - this.kinematics.x);
+        let obsRelAngle = obsAngle - this.kinematics.yaw;
+        while (obsRelAngle > Math.PI) obsRelAngle -= 2 * Math.PI;
+        while (obsRelAngle < -Math.PI) obsRelAngle += 2 * Math.PI;
+
+        // If obstacle is in the forward field of view (within +/- 85 degrees)
+        if (Math.abs(obsRelAngle) < 1.48) {
+          const strength = Math.pow(Math.max(0.01, 0.25 - d) / 0.25, 1.5);
+          // Steer in OPPOSITE direction of the obstacle
+          repulseSteer += (obsRelAngle > 0 ? -1.0 : 1.0) * strength * 2.5;
+        }
+      }
+    }
+
+    // ─── 3. Combine Path Following and Obstacle Repulsion ───
+    let targetAngular = angleDiff * 2.8 + repulseSteer;
+    this.kinematics.cmdAngular = Math.max(-this.kinematics.maxAngularVel, Math.min(this.kinematics.maxAngularVel, targetAngular));
+
+    // ─── 4. Linear Velocity Controller (Slow down on sharp turns or close obstacles) ───
+    const absAngleDiff = Math.abs(angleDiff);
+    if (absAngleDiff > 0.40) {
+      // Large heading error: rotate in place / crawl forward to realign heading
+      this.kinematics.cmdLinear = 0.02;
     } else {
       const isFinal = (this.currentWpIndex === this.waypoints.length - 1);
-      const decel = isFinal ? Math.min(1.0, dist / 0.45) : 1.0;
-      this.kinematics.cmdLinear = Math.max(0.08, this.kinematics.maxLinearVel * decel * (1.0 - Math.abs(angleDiff) / 0.9));
+      const decel = isFinal ? Math.min(1.0, dist / 0.40) : 1.0;
+      // Proximity slowdown if close to an obstacle
+      const obsSlowdown = Math.max(0.35, Math.min(1.0, minObsDist / 0.20));
+
+      const baseSpeed = this.kinematics.maxLinearVel * 0.85; // 0.18 m/s smooth cruise
+      this.kinematics.cmdLinear = Math.max(0.04, baseSpeed * decel * obsSlowdown * (1.0 - absAngleDiff / 0.8));
     }
   }
 
@@ -243,7 +284,7 @@ class Navigator {
     ];
 
     let iterations = 0;
-    const maxIterations = 3000;
+    const maxIterations = 4000;
 
     while (openSet.size > 0 && iterations++ < maxIterations) {
       // Find node with lowest fScore
@@ -259,8 +300,8 @@ class Navigator {
 
       const [curGX, curGY] = currentKey.split(',').map(Number);
 
-      // Check if reached goal
-      if (Math.hypot(curGX - goalGX, curGY - goalGY) <= 1.5) {
+      // Check if reached goal (within 1.5 grid cells)
+      if (Math.hypot(curGX - goalGX, curGY - goalGY) <= 1.4) {
         // Reconstruct path
         const path = [{ x: goalX, y: goalY }];
         let curr = currentKey;
@@ -283,8 +324,8 @@ class Navigator {
         const worldX = toWorld(nextGX);
         const worldY = toWorld(nextGY);
 
-        // Clearance buffer: 16cm pillar radius + 16cm robot radius + 5cm safety = 37cm
-        if (this.isObstacle(worldX, worldY, 0.32)) continue;
+        // Strict Clearance buffer for A* (pillarRadius 0.16 + 0.32 = 0.48m from pillar center)
+        if (this.isObstacle(worldX, worldY, this.plannerClearance)) continue;
 
         const nextKey = key(nextGX, nextGY);
         const tentativeG = (gScore.get(currentKey) || Infinity) + n.cost;
@@ -292,7 +333,7 @@ class Navigator {
         if (tentativeG < (gScore.get(nextKey) || Infinity)) {
           cameFrom.set(nextKey, currentKey);
           gScore.set(nextKey, tentativeG);
-          fScore.set(nextKey, tentativeG + Math.hypot(nextGX - goalGX, nextGY - goalGY) * 1.1);
+          fScore.set(nextKey, tentativeG + Math.hypot(nextGX - goalGX, nextGY - goalGY) * 1.15);
           openSet.add(nextKey);
         }
       }
@@ -303,7 +344,7 @@ class Navigator {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // Path Smoothing (String-Pulling Shortcut Algorithm)
+  // Path Smoothing (Strict Line-of-Sight Shortcut Algorithm)
   // ═══════════════════════════════════════════════════════════════════
   smoothPath(rawPath) {
     if (rawPath.length <= 2) return rawPath;
@@ -314,11 +355,21 @@ class Navigator {
     while (currentIdx < rawPath.length - 1) {
       let furthestIdx = currentIdx + 1;
 
-      // Find the furthest waypoint that has clear line-of-sight
+      // Find furthest reachable waypoint without hitting ANY obstacle along the line
       for (let next = currentIdx + 2; next < rawPath.length; next++) {
-        if (!this.checkPathCollision(rawPath[currentIdx].x, rawPath[currentIdx].y, rawPath[next].x, rawPath[next].y)) {
-          furthestIdx = next;
+        const collision = this.checkPathCollision(
+          rawPath[currentIdx].x, rawPath[currentIdx].y,
+          rawPath[next].x, rawPath[next].y,
+          this.shortcutClearance
+        );
+
+        if (collision) {
+          // CRITICAL: Line of sight is blocked by an obstacle.
+          // You CANNOT skip past this obstacle — STOP searching further!
+          break;
         }
+
+        furthestIdx = next;
       }
 
       smoothed.push(rawPath[furthestIdx]);
@@ -328,13 +379,16 @@ class Navigator {
     return smoothed;
   }
 
-  checkPathCollision(x1, y1, x2, y2) {
-    const steps = 25;
+  checkPathCollision(x1, y1, x2, y2, clearance = 0.28) {
+    const dist = Math.hypot(x2 - x1, y2 - y1);
+    // Check points every 2.5 cm along the line segment
+    const steps = Math.max(12, Math.ceil(dist / 0.025));
+
     for (let i = 1; i < steps; i++) {
       const interpX = x1 + (x2 - x1) * (i / steps);
       const interpY = y1 + (y2 - y1) * (i / steps);
 
-      if (this.isObstacle(interpX, interpY, 0.30)) {
+      if (this.isObstacle(interpX, interpY, clearance)) {
         return true;
       }
     }
@@ -346,7 +400,7 @@ class Navigator {
     if (x < this.world.boundaryMinX + buffer || x > this.world.boundaryMaxX - buffer) return true;
     if (y < this.world.boundaryMinY + buffer || y > this.world.boundaryMaxY - buffer) return true;
 
-    // Check all 9 cylindrical obstacles
+    // Check all cylindrical obstacles
     for (const obs of this.world.obstacles) {
       if (Math.hypot(x - obs.x, y - obs.y) < (obs.radius + buffer)) return true;
     }
