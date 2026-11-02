@@ -49,3 +49,4 @@ rosrun autonav goal_pose.py
 
 # Keep session alive
 wait $NAV_PID
+

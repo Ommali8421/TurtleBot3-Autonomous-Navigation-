@@ -26,92 +26,152 @@ if %ERRORLEVEL% equ 0 (
 )
 
 :: ─────────────────────────────────────────────────────────────────────────
-:: STEP 2: Detect ROS Environment (Docker / WSL)
+:: STEP 2: Non-Blocking Fast ROS Environment Detection
 :: ─────────────────────────────────────────────────────────────────────────
 echo.
 echo [STEP 2/5] Detecting ROS Noetic Environment...
 
-set CID=
-set USE_WSL=0
+set TB_STATUS=
+set TB_MODE=
+set TB_CID=
+set TB_DOCKER_EXE=
 
-:: 1. Probe Windows Docker CLI
-del /f /q "%TEMP%\tb3_docker_ps.txt" >nul 2>&1
-docker ps -q > "%TEMP%\tb3_docker_ps.txt" 2>nul
-
-if exist "%TEMP%\tb3_docker_ps.txt" (
-    set /p FIRST_CID=<"%TEMP%\tb3_docker_ps.txt"
-    if not "!FIRST_CID!"=="" (
-        set CID=!FIRST_CID!
-        echo   [OK] Found running Docker container: !CID!
+:: Run fast non-blocking python probe (timeout protected, will NEVER freeze)
+where python >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    for /f "tokens=1,2 delims==" %%a in ('python "%~dp0detect_env.py"') do (
+        set TB_%%a=%%b
     )
 )
 
-:: 2. If no running container found in Windows Docker, probe WSL Docker
-if "!CID!"=="" (
-    where wsl >nul 2>&1
-    if %ERRORLEVEL% equ 0 (
-        del /f /q "%TEMP%\tb3_wsl_ps.txt" >nul 2>&1
-        wsl -e docker ps -q > "%TEMP%\tb3_wsl_ps.txt" 2>nul
-        if exist "%TEMP%\tb3_wsl_ps.txt" (
-            set /p WSL_CID=<"%TEMP%\tb3_wsl_ps.txt"
-            if not "!WSL_CID!"=="" (
-                set CID=!WSL_CID!
-                set USE_WSL=1
-                echo   [OK] Found running Docker container inside WSL: !CID!
-            )
-        )
+if "!TB_STATUS!"=="RUNNING" goto CONTAINER_FOUND
+if "!TB_STATUS!"=="STOPPED" goto CONTAINER_STOPPED
+if "!TB_STATUS!"=="NO_CONTAINER" goto SPAWN_CONTAINER
+
+:: Docker is not responding or not currently running
+echo   [NOTICE] Docker Desktop daemon is not currently active or responsive.
+echo.
+echo   ---------------------------------------------------------------------
+echo   Please select execution mode (Auto-selecting [1] in 5 seconds):
+echo   ---------------------------------------------------------------------
+echo     [1] Start Docker Desktop and wait for ROS container (Recommended)
+echo     [2] Enter an active Container ID or Name manually
+echo     [3] Launch all 4 Terminals via WSL / Ubuntu (Linux Native)
+echo     [4] Open 4 Terminal windows pre-configured with ROS commands
+echo     [5] Continue in 3D Web Simulator Standalone Mode (Browser Only)
+echo   ---------------------------------------------------------------------
+echo.
+
+choice /C 12345 /T 5 /D 1 /M "Select option (1-5)"
+set CHOICE_VAL=%ERRORLEVEL%
+
+if "%CHOICE_VAL%"=="1" goto START_DOCKER_DESKTOP
+if "%CHOICE_VAL%"=="2" goto MANUAL_CONTAINER_ID
+if "%CHOICE_VAL%"=="3" goto LAUNCH_WSL_TERMINALS
+if "%CHOICE_VAL%"=="4" goto LAUNCH_CMD_TERMINALS
+if "%CHOICE_VAL%"=="5" goto STANDALONE_MODE
+
+:: ─────────────────────────────────────────────────────────────────────────
+:: Option 1: Start Docker Desktop and Poll Daemon
+:: ─────────────────────────────────────────────────────────────────────────
+:START_DOCKER_DESKTOP
+if not "!TB_DOCKER_EXE!"=="" (
+    if exist "!TB_DOCKER_EXE!" (
+        echo   [INFO] Starting Docker Desktop from: !TB_DOCKER_EXE!...
+        start "" "!TB_DOCKER_EXE!"
     )
+) else (
+    start "" "C:\Program Files\Docker\Docker\Docker Desktop.exe" 2>nul
 )
 
-:: 3. If still no running container, try starting stopped 'turtlebot3_sim'
-if "!CID!"=="" (
-    echo   [INFO] Checking for existing 'turtlebot3_sim' container...
-    docker start turtlebot3_sim >nul 2>&1
-    timeout /t 2 /nobreak >nul
-    for /f "tokens=1" %%c in ('docker ps -q --filter "name=turtlebot3_sim" 2^>nul') do set CID=%%c
-    if not "!CID!"=="" (
-        echo   [OK] Started existing container: !CID!
-    )
+echo   [WAIT] Waiting for Docker daemon to initialize (checking up to 30s)...
+set /a ATTEMPTS=0
+
+:WAIT_DOCKER_LOOP
+timeout /t 3 /nobreak >nul
+set /a ATTEMPTS+=1
+
+for /f "tokens=1,2 delims==" %%a in ('python "%~dp0detect_env.py"') do (
+    set TB_%%a=%%b
 )
 
-:: 4. If no container exists, try launching a new one
-if "!CID!"=="" (
-    echo   [INFO] Starting new ROS container (turtlebot3_sim)...
-    docker run -d --name turtlebot3_sim --net=host -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix:rw -v "%CD%\catkin_ws:/root/catkin_ws" osrf/ros:noetic-desktop-full tail -f /dev/null >nul 2>&1
-    timeout /t 2 /nobreak >nul
-    for /f "tokens=1" %%c in ('docker ps -q --filter "name=turtlebot3_sim" 2^>nul') do set CID=%%c
+if "!TB_STATUS!"=="RUNNING" goto CONTAINER_FOUND
+if "!TB_STATUS!"=="STOPPED" goto CONTAINER_STOPPED
+if "!TB_STATUS!"=="NO_CONTAINER" goto SPAWN_CONTAINER
+
+if !ATTEMPTS! lss 10 (
+    echo   [WAIT] Still waiting for Docker engine (!ATTEMPTS!/10)...
+    goto WAIT_DOCKER_LOOP
 )
 
-:: If Docker is completely unreachable, give clear options
-if "!CID!"=="" (
-    echo.
-    echo   [NOTICE] No active ROS Docker container detected.
-    echo   Please make sure Docker Desktop is running, OR launch your ROS container manually:
-    echo     docker run -it --net=host -v "%CD%\catkin_ws:/root/catkin_ws" osrf/ros:noetic-desktop-full
-    echo.
-    echo   The 3D Web Simulator is already running in your browser in Standalone Mode!
-    echo   You can drive with WASD and test autonomous navigation right in the browser.
-    echo.
-    pause
-    exit /b
-)
+echo.
+echo   [WARNING] Docker Desktop took longer than 30s to initialize.
+echo   Falling back to opening pre-configured terminal windows...
+goto LAUNCH_CMD_TERMINALS
 
-:: Configure command runner prefix depending on whether container is host or WSL
-if "!USE_WSL!"=="1" (
+:: ─────────────────────────────────────────────────────────────────────────
+:: Option 2: Manual Container ID
+:: ─────────────────────────────────────────────────────────────────────────
+:MANUAL_CONTAINER_ID
+echo.
+set /p USER_CID="Enter Container ID or Name: "
+if "%USER_CID%"=="" goto STANDALONE_MODE
+set CID=%USER_CID%
+set DEXEC=docker exec -it !CID!
+set DEXEC_BG=docker exec !CID!
+goto COMPILE_AND_LAUNCH
+
+:: ─────────────────────────────────────────────────────────────────────────
+:: Flow: Resume Stopped Container
+:: ─────────────────────────────────────────────────────────────────────────
+:CONTAINER_STOPPED
+set CID=!TB_CID!
+echo   [INFO] Starting existing container !CID!...
+if "!TB_MODE!"=="WSL" (
+    wsl -e docker start !CID! >nul 2>&1
+    set DEXEC=wsl -e docker exec -it !CID!
+    set DEXEC_BG=wsl -e docker exec !CID!
+) else (
+    docker start !CID! >nul 2>&1
+    set DEXEC=docker exec -it !CID!
+    set DEXEC_BG=docker exec !CID!
+)
+goto COMPILE_AND_LAUNCH
+
+:: ─────────────────────────────────────────────────────────────────────────
+:: Flow: Spawn New ROS Container
+:: ─────────────────────────────────────────────────────────────────────────
+:SPAWN_CONTAINER
+echo   [INFO] Spawning new ROS Noetic container (turtlebot3_sim)...
+docker run -d --name turtlebot3_sim --net=host -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix:rw -v "%~dp0catkin_ws:/root/catkin_ws" osrf/ros:noetic-desktop-full tail -f /dev/null >nul 2>&1
+set CID=turtlebot3_sim
+set DEXEC=docker exec -it !CID!
+set DEXEC_BG=docker exec !CID!
+goto COMPILE_AND_LAUNCH
+
+:: ─────────────────────────────────────────────────────────────────────────
+:: Flow: Connected Container Found
+:: ─────────────────────────────────────────────────────────────────────────
+:CONTAINER_FOUND
+set CID=!TB_CID!
+echo   [OK] Connected to running ROS container: !CID!
+if "!TB_MODE!"=="WSL" (
     set DEXEC=wsl -e docker exec -it !CID!
     set DEXEC_BG=wsl -e docker exec !CID!
 ) else (
     set DEXEC=docker exec -it !CID!
     set DEXEC_BG=docker exec !CID!
 )
+goto COMPILE_AND_LAUNCH
 
-:: Ensure Catkin workspace is compiled inside container
+:: ─────────────────────────────────────────────────────────────────────────
+:: Build Catkin Workspace and Launch Terminals (Docker Mode)
+:: ─────────────────────────────────────────────────────────────────────────
+:COMPILE_AND_LAUNCH
 echo   [INFO] Verifying Catkin workspace inside container...
 !DEXEC_BG! bash -c "source /opt/ros/noetic/setup.bash && [ -f /root/catkin_ws/devel/setup.bash ] || (cd /root/catkin_ws && catkin_make)" >nul 2>&1
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: STEP 3: Terminal 1 - Gazebo Simulation World
-:: ─────────────────────────────────────────────────────────────────────────
+:: Terminal 1: Gazebo Simulation World
 echo.
 echo [STEP 3/5] Starting Terminal 1: Gazebo Simulation World...
 start "Terminal 1: Gazebo 3D Simulation" cmd /k "color 0A && echo =================================================== && echo   TERMINAL 1: GAZEBO 3D SIMULATION WORLD && echo =================================================== && !DEXEC! bash -c \"source /opt/ros/noetic/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch turtlebot3_gazebo turtlebot3_world.launch\""
@@ -119,19 +179,15 @@ start "Terminal 1: Gazebo 3D Simulation" cmd /k "color 0A && echo ==============
 echo   [WAIT] Waiting 8 seconds for Gazebo physics and roscore to initialize...
 timeout /t 8 /nobreak >nul
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: STEP 4: Terminal 2 - Navigation Stack, 2D RViz View, and ROSBridge
-:: ─────────────────────────────────────────────────────────────────────────
+:: Terminal 2: Navigation Stack, 2D RViz View, and ROSBridge
 echo.
 echo [STEP 4/5] Starting Terminal 2: Navigation Stack, 2D RViz, and ROSBridge...
-start "Terminal 2: Navigation & 2D RViz" cmd /k "color 0B && echo =================================================== && echo   TERMINAL 2: NAVIGATION STACK, 2D RVIZ, ROSBRIDGE && echo =================================================== && !DEXEC! bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && export TURTLEBOT3_MODEL=burger && (roslaunch autonav navigation_with_bridge.launch || roslaunch turtlebot3_navigation turtlebot3_navigation.launch map_file:=/opt/ros/noetic/share/turtlebot3_navigation/maps/map.yaml)\""
+start "Terminal 2: Navigation and 2D RViz" cmd /k "color 0B && echo =================================================== && echo   TERMINAL 2: NAVIGATION STACK, 2D RVIZ, ROSBRIDGE && echo =================================================== && !DEXEC! bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && export TURTLEBOT3_MODEL=burger && (roslaunch autonav navigation_with_bridge.launch || roslaunch turtlebot3_navigation turtlebot3_navigation.launch map_file:=/opt/ros/noetic/share/turtlebot3_navigation/maps/map.yaml)\""
 
 echo   [WAIT] Waiting 12 seconds for AMCL localization and costmaps to initialize...
 timeout /t 12 /nobreak >nul
 
-:: ─────────────────────────────────────────────────────────────────────────
-:: STEP 5: Terminal 3 & 4 - Pose Sync & Autonomous Goal
-:: ─────────────────────────────────────────────────────────────────────────
+:: Step 5: Terminals 3 and 4
 echo.
 echo [STEP 5/5] Launching Synchronized AMCL Initialization and Goal Navigation...
 
@@ -144,6 +200,56 @@ timeout /t 4 /nobreak >nul
 :: Terminal 4: Autonomous Goal Pose Action Client
 start "Terminal 4: Autonomous Goal Navigation" cmd /k "color 0D && echo =================================================== && echo   TERMINAL 4: AUTONOMOUS GOAL ACTION CLIENT && echo =================================================== && !DEXEC! bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav goal_pose.py\""
 
+goto LAUNCH_SUCCESS
+
+:: ─────────────────────────────────────────────────────────────────────────
+:: Option 3: Launch Native WSL / Ubuntu Terminals
+:: ─────────────────────────────────────────────────────────────────────────
+:LAUNCH_WSL_TERMINALS
+echo.
+echo [STEP 3/5] Starting Terminal 1: Gazebo Simulation World in WSL...
+start "Terminal 1: Gazebo (WSL)" wsl -e bash -c "source /opt/ros/noetic/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch turtlebot3_gazebo turtlebot3_world.launch"
+
+echo   [WAIT] Waiting 8 seconds for Gazebo physics and roscore to initialize...
+timeout /t 8 /nobreak >nul
+
+echo.
+echo [STEP 4/5] Starting Terminal 2: Navigation Stack and RViz in WSL...
+start "Terminal 2: Navigation and RViz (WSL)" wsl -e bash -c "source /opt/ros/noetic/setup.bash && source ~/catkin_ws/devel/setup.bash 2>/dev/null || source /root/catkin_ws/devel/setup.bash 2>/dev/null; export TURTLEBOT3_MODEL=burger && roslaunch autonav navigation_with_bridge.launch"
+
+echo   [WAIT] Waiting 12 seconds for AMCL localization and costmaps to initialize...
+timeout /t 12 /nobreak >nul
+
+echo.
+echo [STEP 5/5] Launching Terminal 3 and 4 in WSL...
+start "Terminal 3: AMCL Localization Sync (WSL)" wsl -e bash -c "source /opt/ros/noetic/setup.bash && source ~/catkin_ws/devel/setup.bash 2>/dev/null || source /root/catkin_ws/devel/setup.bash 2>/dev/null; rosrun autonav init_pose.py"
+
+timeout /t 4 /nobreak >nul
+start "Terminal 4: Autonomous Goal Action Client (WSL)" wsl -e bash -c "source /opt/ros/noetic/setup.bash && source ~/catkin_ws/devel/setup.bash 2>/dev/null || source /root/catkin_ws/devel/setup.bash 2>/dev/null; rosrun autonav goal_pose.py"
+
+goto LAUNCH_SUCCESS
+
+:: ─────────────────────────────────────────────────────────────────────────
+:: Option 4: Launch Pre-Configured Command Windows
+:: ─────────────────────────────────────────────────────────────────────────
+:LAUNCH_CMD_TERMINALS
+echo.
+echo [INFO] Spawning 4 pre-configured terminal windows...
+
+start "Terminal 1: Gazebo Simulation" cmd /k "color 0A && echo =================================================== && echo   TERMINAL 1: GAZEBO 3D SIMULATION && echo   Command: docker exec -it $(docker ps -q -l) bash -c \"source /opt/ros/noetic/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch turtlebot3_gazebo turtlebot3_world.launch\" && echo ==================================================="
+
+start "Terminal 2: Navigation & RViz" cmd /k "color 0B && echo =================================================== && echo   TERMINAL 2: NAVIGATION STACK, 2D RVIZ, ROSBRIDGE && echo   Command: docker exec -it $(docker ps -q -l) bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && export TURTLEBOT3_MODEL=burger && roslaunch autonav navigation_with_bridge.launch\" && echo ==================================================="
+
+start "Terminal 3: AMCL Sync" cmd /k "color 0E && echo =================================================== && echo   TERMINAL 3: AMCL LOCALIZATION SYNCHRONIZATION && echo   Command: docker exec -it $(docker ps -q -l) bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav init_pose.py\" && echo ==================================================="
+
+start "Terminal 4: Goal Dispatcher" cmd /k "color 0D && echo =================================================== && echo   TERMINAL 4: AUTONOMOUS GOAL ACTION CLIENT && echo   Command: docker exec -it $(docker ps -q -l) bash -c \"source /opt/ros/noetic/setup.bash && source /root/catkin_ws/devel/setup.bash && rosrun autonav goal_pose.py\" && echo ==================================================="
+
+goto LAUNCH_SUCCESS
+
+:: ─────────────────────────────────────────────────────────────────────────
+:: Success Notification
+:: ─────────────────────────────────────────────────────────────────────────
+:LAUNCH_SUCCESS
 echo.
 echo =====================================================================
 echo   ALL 4 TERMINALS AND 3D BROWSER VIEW ARE NOW SYNCHRONIZED!
@@ -156,3 +262,15 @@ echo   - Terminal 4: Autonomous Goal Dispatcher (Streaming Coordinates)
 echo =====================================================================
 echo.
 pause
+exit /b
+
+:: ─────────────────────────────────────────────────────────────────────────
+:: Standalone Mode
+:: ─────────────────────────────────────────────────────────────────────────
+:STANDALONE_MODE
+echo.
+echo   [OK] 3D Web Simulator is running at http://localhost:8000
+echo   Use WASD to drive or click on the arena to set autonomous nav goals.
+echo.
+pause
+exit /b
